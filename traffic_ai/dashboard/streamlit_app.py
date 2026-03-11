@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+# Ensure the project root is on sys.path so 'traffic_ai' is importable
+# when running on Streamlit Cloud (where CWD may not be the repo root)
+_project_root = Path(__file__).resolve().parents[2]
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
 
 import anthropic
 import numpy as np
