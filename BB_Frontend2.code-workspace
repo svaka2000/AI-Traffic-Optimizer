@@ -1,0 +1,10 @@
+{
+	"folders": [
+		{
+			"uri": "vscode-remote://wsl+ubuntu-24.04/home/svaka2000/opencs/BB_Frontend2"
+		},
+		{
+			"uri": "vscode-remote://wsl+ubuntu-24.04/home/svaka2000/opencs/BB_flask2"
+		}
+	]
+}

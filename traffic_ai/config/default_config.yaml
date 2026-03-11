@@ -1,0 +1,92 @@
+project:
+  name: traffic_ai_optimization
+  seed: 42
+  output_dir: artifacts
+
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  timestamp_column: timestamp
+  target_column: optimal_phase
+  train_ratio: 0.70
+  val_ratio: 0.15
+  test_ratio: 0.15
+  normalize: true
+  kaggle_datasets:
+    - id: fedesoriano/traffic-prediction-dataset
+      enabled: false
+    - id: hasaanansari/traffic-dataset
+      enabled: false
+    - id: denkuznets81/dynamic-traffic-signal-sensor-fusion-dataset
+      enabled: false
+    - id: alistairking/urban-traffic-light-control-dataset
+      enabled: false
+    - id: sobhanmoosavi/us-accidents
+      enabled: false
+    - id: uciml/electric-power-consumption-data-set
+      enabled: false
+  public_sources:
+    - name: sample_urban_volume
+      url: https://raw.githubusercontent.com/plotly/datasets/master/traffic.csv
+      enabled: true
+    - name: sample_loop_detector
+      url: https://raw.githubusercontent.com/jbrownlee/Datasets/master/airline-passengers.csv
+      enabled: true
+
+simulation:
+  steps: 2000
+  intersections: 4
+  lanes_per_direction: 2
+  step_seconds: 1.0
+  demand_profile: rush_hour
+  demand_scale: 1.0
+  max_queue_per_lane: 60
+  # Multi-intersection grid settings (Phase 2 simulation engine)
+  grid_rows: 2
+  grid_cols: 2
+  rush_hour_scale: 2.5
+
+controllers:
+  fixed_timing:
+    cycle_seconds: 30
+    green_split: 0.5
+    green_split_ns: 0.55
+  rule_based:
+    min_green: 10
+    max_green: 60
+    threshold: 5.0
+  adaptive_rule:
+    min_green: 15
+    max_green: 75
+    queue_threshold: 6
+  supervised:
+    enabled: true
+    models: [random_forest, gradient_boosting, xgboost, mlp, lstm, imitation]
+  reinforcement_learning:
+    enabled: true
+    algorithms: [q_learning, dqn, ppo]
+  controllers_to_run:
+    - fixed_timing
+    - rule_based
+    - adaptive_rule
+    - random_forest
+    - gradient_boosting
+    - xgboost
+    - mlp
+    - q_learning
+    - dqn
+    - ppo
+
+experiments:
+  quick_run:
+    enabled: true
+    episodes: 5
+    cv_folds: 2
+    n_episodes: 5
+  full_run:
+    episodes: 50
+    cv_folds: 5
+    n_episodes: 50
+  significance_alpha: 0.05
+  n_bootstrap: 300
+
