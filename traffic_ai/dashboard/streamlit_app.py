@@ -1564,6 +1564,7 @@ def _build_data_context(data: DashboardData | None) -> str:
     return "EXPERIMENTAL RESULTS (controller summary):\n" + df.to_string(index=False)
 
 
+@st.fragment
 def _render_ai_advisor_tab(data: DashboardData | None) -> None:
     st.subheader("AI Traffic Advisor")
     st.caption(
@@ -1654,6 +1655,7 @@ def _render_ai_advisor_tab(data: DashboardData | None) -> None:
                     messages=[
                         {"role": m["role"], "content": m["content"]}
                         for m in messages
+                        if m["content"].strip()
                     ],
                 ) as stream:
                     for text in stream.text_stream:
@@ -1667,7 +1669,8 @@ def _render_ai_advisor_tab(data: DashboardData | None) -> None:
                 full_response = f"Error contacting Claude: {e}"
                 response_placeholder.error(full_response)
 
-        messages.append({"role": "assistant", "content": full_response})
+        if full_response.strip():
+            messages.append({"role": "assistant", "content": full_response})
 
     # Clear chat button
     if messages:
