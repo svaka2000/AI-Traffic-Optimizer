@@ -98,13 +98,13 @@ def _inject_custom_theme() -> None:
         @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap');
 
         :root {
-            --bg-base: #0A1628;
-            --ink: #FFFFFF;
-            --muted: rgba(255, 255, 255, 0.72);
-            --line: rgba(0, 194, 203, 0.22);
-            --card: rgba(10, 22, 40, 0.78);
-            --accent: #00C2CB;
-            --accent-2: #F0B429;
+            --ink: #e8f0f2;
+            --muted: #8fa8b4;
+            --line: #2a3f4d;
+            --card: rgba(20, 38, 50, 0.85);
+            --accent: #0fc5c8;
+            --accent-2: #ee9b00;
+            --bg-base: #0d1e28;
         }
 
         html, body,
@@ -123,9 +123,9 @@ def _inject_custom_theme() -> None:
         .stApp {
             color: var(--ink);
             background:
-                radial-gradient(900px 500px at 5% 0%, rgba(0, 194, 203, 0.18) 0%, transparent 65%),
-                radial-gradient(800px 400px at 95% 10%, rgba(240, 180, 41, 0.14) 0%, transparent 65%),
-                linear-gradient(180deg, #0A1628 0%, #09121F 100%);
+                radial-gradient(900px 500px at 5% 0%, #0a2e3a 0%, transparent 65%),
+                radial-gradient(800px 400px at 95% 10%, #0f2233 0%, transparent 65%),
+                linear-gradient(180deg, #0d1e28 0%, #091620 100%);
         }
 
         /* Force text elements to light — avoid icon/button spans */
@@ -142,8 +142,8 @@ def _inject_custom_theme() -> None:
         }
 
         [data-testid="stSidebar"] {
-            background: linear-gradient(180deg, rgba(0, 194, 203, 0.10) 0%, #0A1628 60%, #08101B 100%);
-            border-right: 1px solid rgba(0, 194, 203, 0.28);
+            background: linear-gradient(180deg, #111f2a 0%, #0d1920 100%);
+            border-right: 1px solid var(--line);
         }
 
         [data-testid="stSidebar"] * {
@@ -152,10 +152,9 @@ def _inject_custom_theme() -> None:
 
         div[data-testid="stMetric"] {
             background: var(--card);
-            border: 1px solid rgba(0, 194, 203, 0.18);
+            border: 1px solid var(--line);
             border-radius: 14px;
             padding: 12px 14px;
-            box-shadow: 0 18px 44px rgba(0, 0, 0, 0.22);
         }
 
         div[data-testid="stMetricValue"],
@@ -175,13 +174,11 @@ def _inject_custom_theme() -> None:
         [data-testid="stDataFrame"] {
             background: var(--card);
             border-radius: 10px;
-            border: 1px solid rgba(0, 194, 203, 0.18);
-            box-shadow: 0 18px 44px rgba(0, 0, 0, 0.18);
         }
 
         .stButton > button {
             border-radius: 999px;
-            border: 1px solid rgba(0, 194, 203, 0.35);
+            border: 1px solid #0fc5c833;
             color: var(--ink);
         }
 
@@ -189,36 +186,31 @@ def _inject_custom_theme() -> None:
             background: linear-gradient(135deg, var(--accent) 0%, #0a8f92 100%);
             color: #0d1e28;
             font-weight: 600;
-            border: 1px solid rgba(0, 194, 203, 0.60);
+            border: 1px solid #0fc5c866;
         }
 
         .hero {
-            color: #FFFFFF;
+            color: #f0fafa;
             border-radius: 18px;
-            border: 1px solid rgba(0, 194, 203, 0.32);
-            padding: 1.35rem 1.35rem;
+            border: 1px solid #0fc5c830;
+            padding: 1.25rem 1.35rem;
             margin-bottom: 0.95rem;
-            background: linear-gradient(
-                120deg,
-                rgba(0, 194, 203, 0.20) 0%,
-                rgba(240, 180, 41, 0.12) 60%,
-                rgba(10, 22, 40, 0.70) 100%
-            );
-            box-shadow: 0 26px 56px rgba(0, 0, 0, 0.38);
+            background: linear-gradient(120deg, #0f4f5299 0%, #1a3f5ccc 100%);
+            box-shadow: 0 20px 38px #00000044;
         }
 
         .hero-title {
-            font-size: 2.05rem;
+            font-size: 1.9rem;
             line-height: 1.2;
             margin-bottom: 0.35rem;
             font-weight: 700;
-            color: #FFFFFF;
+            color: #f0fafa;
         }
 
         .hero-sub {
             font-size: 1rem;
             opacity: 0.90;
-            color: rgba(255, 255, 255, 0.86);
+            color: #c8e8ec;
         }
 
         .pill {
@@ -226,60 +218,48 @@ def _inject_custom_theme() -> None:
             margin-right: 0.45rem;
             margin-top: 0.7rem;
             border-radius: 999px;
-            border: 1px solid rgba(0, 194, 203, 0.42);
+            border: 1px solid #0fc5c855;
             padding: 0.24rem 0.66rem;
             font-size: 0.78rem;
-            background: rgba(0, 194, 203, 0.14);
-            color: rgba(255, 255, 255, 0.92);
+            background: #0fc5c820;
+            color: #a8e8ec;
             letter-spacing: 0.02em;
-        }
-
-        .pill-teal {
-            border: 1px solid rgba(0, 194, 203, 0.58);
-            background: rgba(0, 194, 203, 0.16);
-        }
-
-        .pill-gold {
-            border: 1px solid rgba(240, 180, 41, 0.60);
-            background: rgba(240, 180, 41, 0.14);
-            color: rgba(255, 246, 217, 0.96);
         }
 
         .source-note {
             margin-top: 0.6rem;
             font-family: "IBM Plex Mono", monospace;
             font-size: 0.78rem;
-            color: rgba(0, 194, 203, 0.85);
+            color: #7ab8c0;
         }
 
         .finding-card {
             border-radius: 14px;
-            border: 1px solid rgba(0, 194, 203, 0.22);
+            border: 1px solid #0fc5c840;
             padding: 1rem 1.2rem;
             margin-bottom: 0.7rem;
-            background: rgba(0, 194, 203, 0.08);
-            box-shadow: 0 22px 60px rgba(0, 0, 0, 0.20);
+            background: rgba(15, 197, 200, 0.07);
         }
 
         .finding-card h4 {
-            color: var(--accent);
+            color: #0fc5c8;
             margin-bottom: 0.3rem;
             font-size: 0.95rem;
             font-weight: 600;
         }
 
         .finding-card p {
-            color: rgba(255, 255, 255, 0.82);
+            color: #c8e8ec;
             font-size: 0.88rem;
             margin: 0;
         }
 
         .onboard-step {
             border-radius: 10px;
-            border: 1px solid rgba(0, 194, 203, 0.22);
+            border: 1px solid #2a3f4d;
             padding: 0.9rem 1.1rem;
             margin-bottom: 0.6rem;
-            background: rgba(10, 22, 40, 0.66);
+            background: rgba(20, 38, 50, 0.6);
         }
 
         .onboard-step .step-num {
@@ -292,13 +272,13 @@ def _inject_custom_theme() -> None:
         .onboard-step .step-title {
             font-weight: 600;
             font-size: 0.95rem;
-            color: rgba(255, 255, 255, 0.92);
+            color: #e8f0f2;
             margin-top: 0.2rem;
         }
 
         .onboard-step .step-desc {
             font-size: 0.83rem;
-            color: rgba(255, 255, 255, 0.72);
+            color: #8fa8b4;
             margin-top: 0.15rem;
         }
 
@@ -313,44 +293,9 @@ def _inject_custom_theme() -> None:
         }
 
         .badge-fixed  { background: #6b7f8e33; color: #9ab4c0; border: 1px solid #6b7f8e66; }
-        .badge-ml     { background: rgba(240, 180, 41, 0.18); color: rgba(255, 221, 150, 0.95); border: 1px solid rgba(240, 180, 41, 0.45); }
+        .badge-ml     { background: #ee9b0033; color: #f5c060; border: 1px solid #ee9b0066; }
         .badge-rl     { background: #9b59b633; color: #c39bd3; border: 1px solid #9b59b666; }
-        .badge-adaptive { background: rgba(0, 194, 203, 0.20); color: rgba(173, 255, 251, 0.96); border: 1px solid rgba(0, 194, 203, 0.44); }
-
-        /* Sidebar dividers (replace Streamlit's default gray) */
-        [data-testid="stSidebar"] .stDivider,
-        [data-testid="stSidebar"] hr {
-            border-top-color: rgba(0, 194, 203, 0.45) !important;
-            border-color: rgba(0, 194, 203, 0.45) !important;
-        }
-
-        /* Charts (Vega-Lite) */
-        .stChart { background: transparent !important; }
-        .stChart .vega-view { background: transparent !important; }
-        .stChart svg text { fill: rgba(255, 255, 255, 0.92) !important; }
-        .stChart .vega-grid line { stroke: rgba(0, 194, 203, 0.18) !important; }
-        .stChart .vega-axis .domain,
-        .stChart .vega-axis line { stroke: rgba(0, 194, 203, 0.52) !important; }
-        .stChart .vega-axis text { fill: rgba(255, 255, 255, 0.92) !important; }
-
-        /* Force plotted marks (bars/lines/points) to our palette */
-        .stChart svg rect[fill] { fill: rgba(0, 194, 203, 0.78) !important; }
-        .stChart svg path[stroke] { stroke: rgba(0, 194, 203, 0.95) !important; }
-        .stChart svg circle[fill] { fill: rgba(0, 194, 203, 0.95) !important; }
-
-        /* Dataframes: ensure no white inner table backgrounds */
-        div[data-testid="stDataFrame"] table {
-            background: transparent !important;
-            color: var(--ink) !important;
-        }
-        div[data-testid="stDataFrame"] th {
-            background: rgba(0, 194, 203, 0.10) !important;
-            color: var(--ink) !important;
-        }
-        div[data-testid="stDataFrame"] td {
-            color: var(--ink) !important;
-            background: transparent !important;
-        }
+        .badge-adaptive { background: #0fc5c833; color: #a8e8ec; border: 1px solid #0fc5c866; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -464,13 +409,15 @@ def _render_header(source_label: str | None) -> None:
     st.markdown(
         f"""
         <div class="hero">
-            <div class="hero-title">Traffic Signal Optimization</div>
+            <div class="hero-title">AI Traffic Signal Optimization</div>
             <div class="hero-sub">
-                Science-fair comparative evaluation of 10 controllers across ML and RL families.
+                Comparative Analysis of 10 Controllers Across ML and RL Families
             </div>
-            <span class="pill pill-gold">San Diego County</span>
-            <span class="pill pill-teal">AI-Driven</span>
-            <span class="pill pill-teal">Pilot Concept</span>
+            <span class="pill">10 Controllers</span>
+            <span class="pill">5-Fold CV</span>
+            <span class="pill">Mann-Whitney U Tests</span>
+            <span class="pill">Ablation Study</span>
+            <span class="pill">66 Unit Tests</span>
             {source_text}
         </div>
         """,
@@ -1165,8 +1112,9 @@ def _render_welcome_state() -> None:
     st.markdown(
         """
         <div style="text-align:center; padding: 2rem 1rem 1rem;">
-            <h2 style="color:#FFFFFF; margin-top:0.25rem;">Welcome to the Traffic Signal Dashboard</h2>
-            <p style="color:rgba(255, 255, 255, 0.72); max-width:540px; margin:0 auto 1.5rem;">
+            <div style="font-size:3rem;">🚦</div>
+            <h2 style="color:#e8f0f2; margin-top:0.5rem;">Welcome to the Traffic AI Dashboard</h2>
+            <p style="color:#8fa8b4; max-width:540px; margin:0 auto 1.5rem;">
                 No benchmark results are loaded yet. Use the sidebar to run a benchmark
                 or load previously saved artifacts.
             </p>
@@ -1215,7 +1163,7 @@ def _render_welcome_state() -> None:
 
     st.markdown(
         """
-        <p style="text-align:center; color:rgba(255, 255, 255, 0.72); margin-top:1rem; font-size:0.83rem;">
+        <p style="text-align:center; color:#8fa8b4; margin-top:1rem; font-size:0.83rem;">
             If you have already run experiments, click <strong>Load Latest Artifacts</strong> in the sidebar.
         </p>
         """,
