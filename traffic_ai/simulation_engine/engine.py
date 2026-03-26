@@ -8,6 +8,7 @@ from typing import Protocol
 import numpy as np
 
 from traffic_ai.simulation_engine.demand import DemandModel
+from traffic_ai.simulation_engine.emissions import EmissionsCalculator
 from traffic_ai.simulation_engine.types import (
     Direction,
     IntersectionState,
@@ -47,7 +48,9 @@ class TrafficNetworkSimulator:
             profile=config.demand_profile,  # type: ignore[arg-type]
             scale=config.demand_scale,
             step_seconds=config.step_seconds,
+            seed=config.seed,
         )
+        self._emissions_calc = EmissionsCalculator()
         self.intersection_ids = list(range(config.intersections))
         self.neighbors = self._build_directional_neighbors()
         self.states = self._init_intersections()
@@ -60,8 +63,19 @@ class TrafficNetworkSimulator:
 
         baseline_reference_queue = None
         for step in range(total_steps):
+            # Tick demand side-effects (emergency, incident)
+            self.demand.tick_emergency(step)
+            self.demand.tick_incident(step)
+
+            # Apply emergency vehicle overrides from demand model
+            self._apply_emergency_events(step)
+
             observations = self._collect_observations(step)
             actions = controller.compute_actions(observations, step)
+
+            # Emergency vehicles force phase regardless of controller
+            actions = self._override_emergency_actions(actions)
+
             self._advance_step(actions, step)
             metrics = self._compute_step_metrics(step)
             if baseline_reference_queue is None:
@@ -80,6 +94,33 @@ class TrafficNetworkSimulator:
             intersection_summaries=summaries,
             aggregate=aggregate,
         )
+
+    def _apply_emergency_events(self, step: int) -> None:
+        """Assign incoming emergency events to random intersections."""
+        events = self.demand.pop_emergency_events()
+        for ev in events:
+            iid = int(self.rng.integers(0, len(self.states)))
+            state = self.states[iid]
+            state.emergency_active = True
+            state.emergency_direction = ev.direction
+            state.emergency_steps_remaining = ev.steps_remaining
+
+    def _override_emergency_actions(
+        self, actions: dict[int, SignalPhase]
+    ) -> dict[int, SignalPhase]:
+        """Force green for emergency vehicle direction, decrement counter."""
+        overridden = dict(actions)
+        for iid, state in self.states.items():
+            if state.emergency_active and state.emergency_steps_remaining > 0:
+                ev_dir = state.emergency_direction
+                # Map N/S direction to NS phase, E/W to EW
+                required_phase: SignalPhase = "NS" if ev_dir in ("N", "S") else "EW"
+                overridden[iid] = required_phase
+                state.emergency_steps_remaining -= 1
+                if state.emergency_steps_remaining <= 0:
+                    state.emergency_active = False
+                    state.emergency_direction = ""
+        return overridden
 
     def _advance_step(self, actions: dict[int, SignalPhase], step: int) -> None:
         # 1) Apply pending inflow from upstream intersections.
@@ -142,14 +183,22 @@ class TrafficNetworkSimulator:
         green_directions = ["N", "S"] if state.current_phase == "NS" else ["E", "W"]
         departures: dict[Direction, float] = {d: 0.0 for d in ["N", "S", "E", "W"]}
 
-        saturation_rate_per_lane = 0.45  # veh/s/lane
+        saturation_rate_per_lane = 0.45  # veh/s/lane (HCM 6th Edition)
+        non_compliance = self.demand.noncompliance_rate()
+
         for direction in ["N", "S", "E", "W"]:
+            svc_multiplier = self.demand.service_rate_multiplier(direction)
             for lane in range(self.config.lanes_per_direction):
                 queue = state.queue_matrix[direction][lane]
                 if direction in green_directions:
                     capacity = float(
-                        self.rng.poisson(saturation_rate_per_lane * self.config.step_seconds)
+                        self.rng.poisson(saturation_rate_per_lane * svc_multiplier * self.config.step_seconds)
                     )
+                    moved = min(queue, capacity)
+                elif non_compliance > 0.0:
+                    # High-density profile: some vehicles run red lights
+                    red_rate = saturation_rate_per_lane * non_compliance * 0.2 * svc_multiplier
+                    capacity = float(self.rng.poisson(red_rate * self.config.step_seconds))
                     moved = min(queue, capacity)
                 else:
                     moved = 0.0
@@ -177,12 +226,20 @@ class TrafficNetworkSimulator:
         throughput = float(
             sum(state.total_departures for state in self.states.values())
         ) / max(step + 1, 1)
-        emissions_proxy = total_queue * 0.21 + float(
-            sum(state.phase_changes for state in self.states.values()) * 0.8
-        )
+        total_phase_changes = int(sum(state.phase_changes for state in self.states.values()))
+        emissions_proxy = total_queue * 0.21 + float(total_phase_changes * 0.8)
         fuel_proxy = total_queue * 0.12 + throughput * 0.04
         fairness = self._fairness_score(queues)
         efficiency = throughput / (1.0 + total_queue / max(len(self.states), 1))
+
+        # EPA-based fuel and CO₂
+        fuel_gallons, co2_kg = self._emissions_calc.compute_step(
+            total_queue=total_queue,
+            departures=total_departures,
+            phase_changes=total_phase_changes,
+            step_seconds=self.config.step_seconds,
+        )
+
         return StepMetrics(
             step=step,
             total_queue=total_queue,
@@ -193,6 +250,8 @@ class TrafficNetworkSimulator:
             fairness=fairness,
             efficiency_score=efficiency,
             delay_reduction_pct=0.0,
+            fuel_gallons=fuel_gallons,
+            co2_kg=co2_kg,
         )
 
     @staticmethod
@@ -237,6 +296,8 @@ class TrafficNetworkSimulator:
             "average_efficiency_score": avg("efficiency_score"),
             "delay_reduction_pct": avg("delay_reduction_pct"),
             "max_queue_length": float(max(item.total_queue for item in logs)),
+            "total_fuel_gallons": float(sum(item.fuel_gallons for item in logs)),
+            "total_co2_kg": float(sum(item.co2_kg for item in logs)),
         }
 
     def _init_intersections(self) -> dict[int, IntersectionState]:

@@ -160,3 +160,131 @@ def test_observation_shapes_consistent() -> None:
     key_sets = [set(v.keys()) for v in obs.values()]
     for ks in key_sets[1:]:
         assert ks == key_sets[0], "All observations should have identical keys"
+
+
+# ---------------------------------------------------------------------------
+# New demand profiles (WS3) — engine-level tests
+# ---------------------------------------------------------------------------
+
+import pytest
+from traffic_ai.simulation_engine.engine import SimulatorConfig, TrafficNetworkSimulator
+from traffic_ai.controllers.fixed import FixedTimingController
+from traffic_ai.simulation_engine.demand import ALL_DEMAND_PROFILES, DemandModel
+
+
+@pytest.mark.parametrize("profile", ALL_DEMAND_PROFILES)
+def test_demand_profile_produces_positive_rates(profile: str) -> None:
+    """Each demand profile must return a positive arrival rate for all steps/directions."""
+    model = DemandModel(profile=profile, scale=1.0, step_seconds=1.0, seed=42)
+    for step in [0, 100, 300, 500, 1000]:
+        for direction in ["N", "S", "E", "W"]:
+            rate = model.arrival_rate_per_lane(step, direction)
+            assert rate > 0, f"Profile {profile} returned non-positive rate at step {step}, dir {direction}"
+
+
+@pytest.mark.parametrize("profile", ALL_DEMAND_PROFILES)
+def test_engine_runs_with_all_demand_profiles(profile: str) -> None:
+    """Engine must complete a short run on every demand profile without error."""
+    cfg = SimulatorConfig(steps=50, intersections=4, demand_profile=profile, seed=0)
+    sim = TrafficNetworkSimulator(cfg)
+    ctrl = FixedTimingController()
+    ctrl.reset(4)
+    result = sim.run(ctrl, steps=50)
+    assert result.aggregate.get("average_queue_length", -1) >= 0
+
+
+def test_emergency_priority_profile_generates_events() -> None:
+    """emergency_priority profile should generate at least one emergency event over 1000 steps."""
+    model = DemandModel(profile="emergency_priority", scale=1.0, step_seconds=1.0, seed=0)
+    events_found = 0
+    for step in range(1000):
+        model.tick_emergency(step)
+        events = model.pop_emergency_events()
+        events_found += len(events)
+    assert events_found > 0, "Expected at least one emergency event over 1000 steps"
+
+
+def test_incident_response_activates_at_step_300() -> None:
+    """incident_response profile should activate incident at step 300."""
+    model = DemandModel(profile="incident_response", scale=1.0, step_seconds=1.0, seed=0)
+    for step in range(301):
+        model.tick_incident(step)
+    assert model._incident_active is True
+
+
+def test_incident_response_recovers_after_step_600() -> None:
+    """Incident should be deactivated at step 600+."""
+    model = DemandModel(profile="incident_response", scale=1.0, step_seconds=1.0, seed=0)
+    for step in range(601):
+        model.tick_incident(step)
+    assert model._incident_active is False
+
+
+def test_high_density_noncompliance_rate() -> None:
+    """high_density_developing profile should return 30% non-compliance."""
+    model = DemandModel(profile="high_density_developing", scale=1.0, step_seconds=1.0, seed=0)
+    assert model.noncompliance_rate() == pytest.approx(0.30)
+
+
+def test_construction_service_rate_reduced_ew() -> None:
+    """construction profile should halve service rate for E/W directions."""
+    model = DemandModel(profile="construction", scale=1.0, step_seconds=1.0, seed=0)
+    assert model.service_rate_multiplier("E") == pytest.approx(0.5)
+    assert model.service_rate_multiplier("W") == pytest.approx(0.5)
+    assert model.service_rate_multiplier("N") == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# EmissionsCalculator tests (WS4)
+# ---------------------------------------------------------------------------
+
+from traffic_ai.simulation_engine.emissions import EmissionsCalculator
+
+
+def test_emissions_zero_queue_zero_idle_fuel() -> None:
+    """Zero queue with no departures should produce near-zero idle fuel."""
+    calc = EmissionsCalculator()
+    fuel, co2 = calc.compute_step(total_queue=0.0, departures=0.0, phase_changes=0, step_seconds=1.0)
+    assert fuel == pytest.approx(0.0, abs=1e-9)
+    assert co2 == pytest.approx(0.0, abs=1e-9)
+
+
+def test_emissions_positive_queue_produces_fuel() -> None:
+    """10 vehicles idling for 1 second should consume non-trivial fuel."""
+    calc = EmissionsCalculator()
+    fuel, co2 = calc.compute_step(total_queue=10.0, departures=0.0, phase_changes=0, step_seconds=1.0)
+    assert fuel > 0.0
+    assert co2 > 0.0
+
+
+def test_emissions_co2_proportional_to_fuel() -> None:
+    """CO2 = fuel * CO2_PER_GALLON."""
+    calc = EmissionsCalculator()
+    fuel, co2 = calc.compute_step(total_queue=20.0, departures=5.0, phase_changes=2, step_seconds=10.0)
+    expected_co2 = fuel * calc.co2_per_gallon
+    assert co2 == pytest.approx(expected_co2, rel=1e-6)
+
+
+def test_emissions_step_metrics_carry_fuel_and_co2() -> None:
+    """Engine StepMetrics should have fuel_gallons and co2_kg fields populated."""
+    cfg = SimulatorConfig(steps=100, intersections=4, demand_profile="rush_hour", seed=42)
+    sim = TrafficNetworkSimulator(cfg)
+    ctrl = FixedTimingController()
+    ctrl.reset(4)
+    result = sim.run(ctrl, steps=100)
+    total_fuel = result.aggregate.get("total_fuel_gallons", -1.0)
+    total_co2 = result.aggregate.get("total_co2_kg", -1.0)
+    assert total_fuel >= 0.0, "total_fuel_gallons should be non-negative"
+    assert total_co2 >= 0.0, "total_co2_kg should be non-negative"
+
+
+def test_emissions_annualise_returns_expected_keys() -> None:
+    """annualise() should return all expected keys."""
+    calc = EmissionsCalculator()
+    result = calc.annualise(
+        total_fuel_gallons=10.0,
+        simulation_steps=1000,
+        step_seconds=1.0,
+    )
+    expected_keys = {"annual_fuel_gallons", "annual_co2_tons", "annual_cost_usd", "trees_equivalent", "homes_powered_equivalent"}
+    assert expected_keys.issubset(result.keys())

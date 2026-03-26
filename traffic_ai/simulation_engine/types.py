@@ -24,6 +24,10 @@ class IntersectionState:
     cumulative_stopped_vehicles: float = 0.0
     phase_changes: int = 0
     pending_inflow: dict[Direction, float] = field(default_factory=dict)
+    # Emergency vehicle tracking
+    emergency_active: bool = False
+    emergency_direction: str = ""
+    emergency_steps_remaining: int = 0
 
     @property
     def queue_ns(self) -> float:
@@ -50,6 +54,7 @@ class IntersectionState:
             "arrivals": float(self.total_arrivals),
             "departures": float(self.total_departures),
             "wait_sec": float(self.cumulative_wait_sec),
+            "emergency_active": 1.0 if self.emergency_active else 0.0,
         }
 
 
@@ -64,6 +69,8 @@ class StepMetrics:
     fairness: float
     efficiency_score: float
     delay_reduction_pct: float
+    fuel_gallons: float = 0.0
+    co2_kg: float = 0.0
 
 
 @dataclass(slots=True)
@@ -72,4 +79,3 @@ class SimulationResult:
     step_metrics: list[StepMetrics]
     intersection_summaries: list[dict[str, float]]
     aggregate: dict[str, float]
-

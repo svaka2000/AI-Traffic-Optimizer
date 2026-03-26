@@ -44,3 +44,49 @@ Deliver a modular, reproducible AI traffic optimization research platform with c
 - [x] End-to-end smoke run: `python main.py --quick-run` passes cleanly.
 - [x] `pytest -q` — 66 tests pass.
 
+## Phase 8: Research-Grade Upgrades — DONE
+### WS1: Upgraded DQN
+- [x] Double DQN: online net selects action, target net evaluates (eliminates overestimation bias).
+- [x] Dueling Architecture: shared 6→128→128 + V(s) value stream + A(s,a) advantage stream.
+- [x] Prioritized Experience Replay (`traffic_ai/rl_models/replay_buffer.py`): |TD error|^α sampling + IS-weight correction + β annealing.
+- [x] N-step returns (3-step buffer) before bootstrapping.
+- [x] RewardShaper class (`traffic_ai/rl_models/rewards.py`): composite reward with queue/throughput/wait/phase-change/emergency/fairness terms.
+- [x] Cosine-annealing LR (3e-4 → 1e-5), gradient clipping (max_norm=1.0), ε: 1.0→0.01 over 80% of training.
+
+### WS2: New RL Controllers
+- [x] `A2CController`: GAE(λ=0.95), separate actor/critic optimizers, entropy_coef=0.01.
+- [x] `SACController`: twin Q-networks, learnable log_α temperature, Polyak update (τ=0.005), off-policy 50k replay.
+- [x] `MADDPGController` (`traffic_ai/controllers/maddpg_controller.py`): per-intersection actors + centralized critics, neighbor-augmented observations, Gumbel-Softmax.
+- [x] `RecurrentPPOController`: LSTM actor/critic (hidden=64), SEQ_LEN=16 BPTT, per-intersection hidden states.
+- [x] Training functions: `traffic_ai/rl_models/a2c.py`, `sac.py`, `maddpg.py`, `recurrent_ppo.py`.
+
+### WS3: 8 New Demand Profiles
+- [x] `DemandModel` extended: weekend, school_zone, event_surge, construction, emergency_priority, high_density_developing, incident_response, weather_degraded.
+- [x] `service_rate_multiplier()`, `tick_emergency()`, `tick_incident()`, `noncompliance_rate()` methods.
+- [x] `IntersectionState`: emergency_active, emergency_direction, emergency_steps_remaining fields.
+- [x] Engine: `_apply_emergency_events()`, `_override_emergency_actions()`, demand side-effect ticks.
+
+### WS4: Environmental Impact Tracking
+- [x] `EmissionsCalculator` (`traffic_ai/simulation_engine/emissions.py`): EPA MOVES3 idle fuel (0.16 gal/hr), CO₂ (8.887 kg/gal), stop-start penalty, annualise().
+- [x] `StepMetrics`: fuel_gallons + co2_kg fields.
+- [x] Engine computes fuel/CO₂ per step; aggregate includes total_fuel_gallons + total_co2_kg.
+- [x] Dashboard Environmental Impact tab: per-controller fuel/CO₂ bars, tree-years equivalent KPI.
+
+### WS5: Controller Info Cards
+- [x] 14 controller expandable glassmorphism cards in dashboard (architecture, strengths, weaknesses).
+- [x] `CONTROLLER_INFO` dict wired into `_render_controller_cards()`.
+
+### WS6: Enhanced Statistics
+- [x] `statistics.py`: Holm-Bonferroni step-down correction, Cohen's d, `bootstrap_median_difference()`, `statistical_power_analysis()`, median bootstrap CI.
+- [x] Dashboard Statistics tab: live correction method switcher, bootstrap CI table with median.
+
+### WS7: UI/UX Overhaul
+- [x] Hero: animated pulse-border, updated subtitle with all new features, 8 pills.
+- [x] Glassmorphism `ctrl-info-card` with hover + fadeSlideIn animation.
+- [x] Environmental metric cards with green-tinted glassmorphism.
+- [x] All 11 demand profiles in Live Simulation selectbox with descriptions.
+- [x] 4 new RL controllers (A2C, SAC, MADDPG, RecurrentPPO) wired into Live Simulation.
+- [x] Fuel/CO₂/tree-years KPI row in Live Simulation results.
+- [x] `CONTROLLER_DISPLAY_NAMES` updated for 14 controllers.
+- [x] `plotly>=5.20.0` added to requirements.txt.
+

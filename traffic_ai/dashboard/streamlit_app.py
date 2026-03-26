@@ -49,7 +49,128 @@ CONTROLLER_DISPLAY_NAMES: dict[str, str] = {
     "ml_logisticregression": "Logistic Regression (ML)",
     "rl_q_learning": "Q-Learning (RL)",
     "rl_dqn": "Deep Q-Network (RL)",
+    "rl_dqn_dueling": "Double Dueling DQN (RL)",
     "rl_policy_gradient": "Policy Gradient (RL)",
+    "rl_a2c": "A2C (RL)",
+    "rl_sac": "SAC Discrete (RL)",
+    "rl_maddpg": "MADDPG Multi-Agent (RL)",
+    "rl_recurrent_ppo": "Recurrent PPO LSTM (RL)",
+}
+
+# Controller info cards content (WS5)
+CONTROLLER_INFO: dict[str, dict[str, str]] = {
+    "Fixed Timing (Baseline)": {
+        "badge": "BASELINE",
+        "badge_class": "badge-fixed",
+        "summary": "Rotates NS↔EW green phases on a fixed 30-second cycle. No adaptation to traffic conditions.",
+        "details": "All intersections follow the same rigid schedule regardless of queue lengths or time of day. Serves as a lower-bound baseline to measure how much AI adds value.",
+        "strengths": "Fully predictable, zero compute cost, easy to audit.",
+        "weaknesses": "Wastes green time during low-traffic phases; causes unnecessary waits during congestion.",
+    },
+    "Adaptive Rule": {
+        "badge": "ADAPTIVE",
+        "badge_class": "badge-adaptive",
+        "summary": "Queue-threshold logic: extends green if one direction has significantly more vehicles queued.",
+        "details": "Compares NS vs EW queue lengths each step and extends the current green phase if the imbalance exceeds a configurable threshold. No machine learning.",
+        "strengths": "Responds to real-time queue conditions without training time.",
+        "weaknesses": "Uses hand-crafted thresholds; cannot learn complex multi-intersection patterns.",
+    },
+    "Random Forest (ML)": {
+        "badge": "ML",
+        "badge_class": "badge-ml",
+        "summary": "Ensemble of 100 decision trees trained on historical queue/phase state to predict optimal signal phase.",
+        "details": "Features: queue_ns, queue_ew, phase_elapsed, time_of_day. Trained via 5-fold CV on simulation rollout data. Hyperparameters tuned with Optuna.",
+        "strengths": "Handles non-linear feature interactions; interpretable via feature importances.",
+        "weaknesses": "Offline training only; cannot adapt during deployment without retraining.",
+    },
+    "XGBoost (ML)": {
+        "badge": "ML",
+        "badge_class": "badge-ml",
+        "summary": "Gradient-boosted trees with L1/L2 regularization and early stopping.",
+        "details": "Sequentially builds trees to correct residual errors. Typically outperforms Random Forest on tabular traffic data due to better handling of feature interactions and regularization.",
+        "strengths": "High accuracy on tabular data; fast inference; supports feature importance.",
+        "weaknesses": "Requires careful hyperparameter tuning; not inherently sequential (no memory).",
+    },
+    "Gradient Boosting (ML)": {
+        "badge": "ML",
+        "badge_class": "badge-ml",
+        "summary": "Scikit-learn GradientBoostingClassifier with 200 estimators and depth-3 trees.",
+        "details": "Classic gradient boosting using CART trees. Slower to train than XGBoost but offers stable probability calibration.",
+        "strengths": "Well-calibrated class probabilities; interpretable.",
+        "weaknesses": "Higher training cost than XGBoost for large datasets.",
+    },
+    "Neural Network MLP (ML)": {
+        "badge": "ML",
+        "badge_class": "badge-ml",
+        "summary": "Multi-layer perceptron (100→50 hidden units, ReLU) trained on simulation state features.",
+        "details": "Supervised classifier using Adam optimizer, trained on queue/phase observations. Can capture non-linear mappings that tree models miss.",
+        "strengths": "Flexible non-linear modeling; scales to richer feature sets.",
+        "weaknesses": "Requires careful normalization; may overfit on small datasets.",
+    },
+    "Q-Learning (RL)": {
+        "badge": "RL",
+        "badge_class": "badge-rl",
+        "summary": "Tabular Q-learning with discretized state space and ε-greedy exploration.",
+        "details": "Maintains a Q-table mapping (queue_bin, phase) → action values. Updates via Bellman equation. Epsilon anneals from 1.0 → 0.05 over training.",
+        "strengths": "Simple, interpretable; guaranteed to converge in tabular settings.",
+        "weaknesses": "State space explosion with more intersections; cannot generalize to unseen states.",
+    },
+    "Deep Q-Network (RL)": {
+        "badge": "RL",
+        "badge_class": "badge-rl",
+        "summary": "DQN with experience replay and target network for stable Q-value approximation.",
+        "details": "Neural network approximates Q(s,a). Replay buffer breaks temporal correlations; separate target network prevents feedback loops. Trained on raw queue/phase observations.",
+        "strengths": "Scales beyond tabular limits; learns state representations automatically.",
+        "weaknesses": "Overestimates Q-values (addressed by Double DQN variant).",
+    },
+    "Double Dueling DQN (RL)": {
+        "badge": "RL",
+        "badge_class": "badge-rl",
+        "summary": "Research-grade DQN with Double DQN, Dueling Architecture, Prioritized Experience Replay, and n-step returns.",
+        "details": "Double DQN: online net selects actions, target net evaluates — eliminating overestimation bias. Dueling: shared feature layers split into V(s) value stream + A(s,a) advantage stream. PER: samples transitions proportional to |TD error|^α with IS-weight correction. 3-step returns + cosine-annealing LR + gradient clipping.",
+        "strengths": "State-of-the-art sample efficiency; robust training; handles sparse rewards.",
+        "weaknesses": "Most complex of the single-agent RL methods; higher compute budget required.",
+    },
+    "Policy Gradient (RL)": {
+        "badge": "RL",
+        "badge_class": "badge-rl",
+        "summary": "REINFORCE policy gradient with entropy regularization and baseline subtraction.",
+        "details": "Directly optimizes a stochastic policy π(a|s; θ) by ascending the gradient of expected return. Entropy bonus encourages exploration. Episode-level updates.",
+        "strengths": "Direct policy optimization; naturally stochastic; handles continuous-like decisions.",
+        "weaknesses": "High variance without a critic; slow convergence compared to actor-critic methods.",
+    },
+    "A2C (RL)": {
+        "badge": "RL",
+        "badge_class": "badge-rl",
+        "summary": "Advantage Actor-Critic with GAE(λ=0.95) advantage estimation and separate actor/critic networks.",
+        "details": "Actor outputs action logits; critic estimates V(s). Advantage = GAE-lambda reduces variance without sacrificing bias. No PPO clipping — pure policy gradient with entropy coefficient 0.01.",
+        "strengths": "Lower variance than REINFORCE; faster convergence; simple architecture.",
+        "weaknesses": "On-policy — less sample-efficient than SAC/DQN.",
+    },
+    "SAC Discrete (RL)": {
+        "badge": "RL",
+        "badge_class": "badge-rl",
+        "summary": "Soft Actor-Critic adapted for discrete actions: twin Q-networks + automatic entropy temperature tuning.",
+        "details": "Two critic networks (Q1, Q2) take min to reduce overestimation. Temperature α is learned automatically to target H(π)=log(2) for binary actions. Off-policy replay (50k) makes it highly sample-efficient. Polyak target update (τ=0.005).",
+        "strengths": "Excellent sample efficiency; automatic exploration via entropy; stable training.",
+        "weaknesses": "More hyperparameters than simpler methods; requires tuning replay ratio.",
+    },
+    "MADDPG Multi-Agent (RL)": {
+        "badge": "RL",
+        "badge_class": "badge-rl",
+        "summary": "Multi-Agent DDPG: each intersection has its own actor, but critics see ALL neighbors' observations and actions.",
+        "details": "KEY INNOVATION: Centralized training, decentralized execution. Actor takes local obs augmented with neighbor queue info (4-direction, 2 features each). Critic input = concat([all_obs, all_actions]). Gumbel-Softmax enables differentiable discrete actions during training.",
+        "strengths": "Explicitly models inter-intersection dependencies; scales to large grids.",
+        "weaknesses": "Largest network; requires neighbor topology; more training time.",
+    },
+    "Recurrent PPO LSTM (RL)": {
+        "badge": "RL",
+        "badge_class": "badge-rl",
+        "summary": "PPO with LSTM actor-critic (hidden_size=64): remembers temporal traffic patterns across steps.",
+        "details": "LSTM processes sequential observation history (SEQ_LEN=16 truncated BPTT). Per-intersection hidden states are maintained and reset at episode boundaries. PPO clip ε=0.2. Particularly effective on time-varying profiles (rush_hour, event_surge, incident_response).",
+        "strengths": "Temporal memory captures demand patterns; handles non-Markovian dynamics.",
+        "weaknesses": "Stateful inference requires hidden state management; harder to parallelize.",
+    },
 }
 
 COLUMN_LABELS: dict[str, str] = {
@@ -302,6 +423,86 @@ def _inject_custom_theme() -> None:
         .badge-ml     { background: rgba(251,191,36,0.12);  color: #f5c060; border: 1px solid rgba(251,191,36,0.3); }
         .badge-rl     { background: rgba(155,89,182,0.15);  color: #c39bd3; border: 1px solid rgba(155,89,182,0.35); }
         .badge-adaptive { background: rgba(56,189,248,0.12); color: #a8daf5; border: 1px solid rgba(56,189,248,0.3); }
+
+        /* ---- Glassmorphism controller cards ---- */
+        .ctrl-info-card {
+            background: rgba(15, 30, 44, 0.55);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(56, 189, 248, 0.16);
+            border-radius: 14px;
+            padding: 1rem 1.2rem 0.9rem;
+            margin-bottom: 0.7rem;
+            transition: border-color 0.25s ease, box-shadow 0.25s ease;
+        }
+        .ctrl-info-card:hover {
+            border-color: rgba(56, 189, 248, 0.35);
+            box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+        }
+        .ctrl-info-card .card-title {
+            font-size: 0.97rem;
+            font-weight: 600;
+            color: #dff0fa;
+            margin-bottom: 0.25rem;
+        }
+        .ctrl-info-card .card-summary {
+            font-size: 0.84rem;
+            color: #93bbd0;
+            margin-bottom: 0.45rem;
+        }
+        .ctrl-info-card .card-label {
+            font-size: 0.77rem;
+            font-weight: 600;
+            color: #5fa8c8;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-top: 0.4rem;
+            margin-bottom: 0.1rem;
+        }
+        .ctrl-info-card .card-detail {
+            font-size: 0.82rem;
+            color: #7ba8be;
+        }
+
+        /* ---- Environmental impact panel ---- */
+        .env-metric {
+            background: rgba(16, 36, 28, 0.6);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(52, 211, 153, 0.2);
+            border-radius: 12px;
+            padding: 0.8rem 1rem;
+            text-align: center;
+        }
+        .env-metric .env-val {
+            font-size: 1.55rem;
+            font-weight: 700;
+            color: #34d399;
+            line-height: 1.1;
+        }
+        .env-metric .env-label {
+            font-size: 0.78rem;
+            color: #6ee7b7;
+            margin-top: 0.2rem;
+        }
+
+        /* ---- Hero pulse animation ---- */
+        @keyframes pulse-border {
+            0%   { border-color: rgba(56, 189, 248, 0.18); }
+            50%  { border-color: rgba(56, 189, 248, 0.38); }
+            100% { border-color: rgba(56, 189, 248, 0.18); }
+        }
+        .hero {
+            animation: pulse-border 4s ease-in-out infinite;
+        }
+
+        /* ---- Slide-in fade for cards ---- */
+        @keyframes fadeSlideIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        .ctrl-info-card {
+            animation: fadeSlideIn 0.35s ease both;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -403,6 +604,173 @@ def _run_benchmark(
 
 
 # ---------------------------------------------------------------------------
+# Controller Info Cards (WS5)
+# ---------------------------------------------------------------------------
+
+def _render_controller_cards(filter_family: str | None = None) -> None:
+    """Expandable glassmorphism cards describing every controller."""
+    st.markdown("#### Controller Reference Guide")
+    st.caption(
+        "Click any controller to learn about its architecture, strengths, and trade-offs."
+    )
+
+    family_map = {
+        "Baseline": ["Fixed Timing (Baseline)"],
+        "Adaptive": ["Adaptive Rule"],
+        "ML": [
+            "Random Forest (ML)", "XGBoost (ML)", "Gradient Boosting (ML)",
+            "Neural Network MLP (ML)",
+        ],
+        "RL": [
+            "Q-Learning (RL)", "Deep Q-Network (RL)", "Double Dueling DQN (RL)",
+            "Policy Gradient (RL)", "A2C (RL)", "SAC Discrete (RL)",
+            "MADDPG Multi-Agent (RL)", "Recurrent PPO LSTM (RL)",
+        ],
+    }
+
+    families = ["Baseline", "Adaptive", "ML", "RL"]
+    if filter_family and filter_family in family_map:
+        families = [filter_family]
+
+    for family in families:
+        badge_classes = {
+            "Baseline": "badge-fixed", "Adaptive": "badge-adaptive",
+            "ML": "badge-ml", "RL": "badge-rl",
+        }
+        with st.expander(
+            f"{family} Controllers ({len(family_map[family])})",
+            expanded=(family == "RL"),
+        ):
+            cols = st.columns(2)
+            for i, ctrl_name in enumerate(family_map[family]):
+                info = CONTROLLER_INFO.get(ctrl_name, {})
+                badge_cls = info.get("badge_class", badge_classes.get(family, "badge-fixed"))
+                badge_lbl = info.get("badge", family.upper())
+                summary = info.get("summary", "")
+                details = info.get("details", "")
+                strengths = info.get("strengths", "")
+                weaknesses = info.get("weaknesses", "")
+                with cols[i % 2]:
+                    st.markdown(
+                        f"""
+                        <div class="ctrl-info-card">
+                            <div class="card-title">
+                                <span class="ctrl-badge {badge_cls}">{badge_lbl}</span>
+                                &nbsp;{ctrl_name}
+                            </div>
+                            <div class="card-summary">{summary}</div>
+                            <div class="card-label">How it works</div>
+                            <div class="card-detail">{details}</div>
+                            <div class="card-label">Strengths</div>
+                            <div class="card-detail">{strengths}</div>
+                            <div class="card-label">Weaknesses</div>
+                            <div class="card-detail">{weaknesses}</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+
+# ---------------------------------------------------------------------------
+# Environmental Impact Panel (WS4)
+# ---------------------------------------------------------------------------
+
+def _render_environmental_impact(data: DashboardData) -> None:
+    """EPA-based fuel and CO2 impact panel."""
+    st.markdown("#### Environmental Impact (EPA MOVES3 Estimates)")
+    st.caption(
+        "Fuel and CO\u2082 calculations use EPA MOVES3 idle consumption factors "
+        "(0.16 gal/hr/vehicle) and 8.887 kg CO\u2082/gallon. "
+        "Lower queue → less idle fuel → less emissions."
+    )
+
+    if data.step_df.empty or "fuel_gallons" not in data.step_df.columns:
+        st.info(
+            "Environmental data not available. Run a benchmark to populate fuel/CO\u2082 metrics."
+        )
+        return
+
+    # Aggregate per controller
+    env_df = (
+        data.step_df.groupby("controller", as_index=False)
+        .agg(
+            total_fuel=("fuel_gallons", "sum"),
+            total_co2=("co2_kg", "sum"),
+            avg_queue=("total_queue", "mean"),
+        )
+    )
+    env_df["controller_label"] = env_df["controller"].apply(_display_controller_name)
+    env_df = env_df.sort_values("total_fuel")
+
+    best = env_df.iloc[0]
+    worst = env_df.iloc[-1]
+    fuel_saved = float(worst["total_fuel"] - best["total_fuel"])
+    co2_saved = float(worst["total_co2"] - best["total_co2"])
+    trees_equiv = co2_saved / 22.0   # ~22 kg CO2 absorbed per tree per year
+
+    e1, e2, e3, e4 = st.columns(4)
+    with e1:
+        st.markdown(
+            f"""
+            <div class="env-metric">
+                <div class="env-val">{best["total_fuel"]:.2f}</div>
+                <div class="env-label">Min Fuel Consumed (gal)<br><b>{best["controller_label"]}</b></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with e2:
+        st.markdown(
+            f"""
+            <div class="env-metric">
+                <div class="env-val">{best["total_co2"]:.1f}</div>
+                <div class="env-label">Min CO&#8322; Emitted (kg)<br><b>{best["controller_label"]}</b></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with e3:
+        st.markdown(
+            f"""
+            <div class="env-metric">
+                <div class="env-val">{fuel_saved:.2f}</div>
+                <div class="env-label">Fuel Saved vs Worst (gal)<br><i>Best vs {worst["controller_label"]}</i></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with e4:
+        st.markdown(
+            f"""
+            <div class="env-metric">
+                <div class="env-val">{trees_equiv:.0f}</div>
+                <div class="env-label">Tree-Years Equivalent<br><i>CO&#8322; reduction</i></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    left, right = st.columns(2)
+    with left:
+        st.markdown("##### Fuel Consumption by Controller")
+        fuel_chart = (
+            env_df[["controller_label", "total_fuel"]]
+            .set_index("controller_label")
+            .rename(columns={"total_fuel": "Total Fuel (gal)"})
+        )
+        st.bar_chart(fuel_chart, use_container_width=True, height=280)
+
+    with right:
+        st.markdown("##### CO\u2082 Emissions by Controller")
+        co2_chart = (
+            env_df[["controller_label", "total_co2"]]
+            .set_index("controller_label")
+            .rename(columns={"total_co2": "Total CO\u2082 (kg)"})
+        )
+        st.bar_chart(co2_chart, use_container_width=True, height=280)
+
+
+# ---------------------------------------------------------------------------
 # Header / Hero
 # ---------------------------------------------------------------------------
 
@@ -417,13 +785,18 @@ def _render_header(source_label: str | None) -> None:
         <div class="hero">
             <div class="hero-title">AI Traffic Signal Optimization</div>
             <div class="hero-sub">
-                Comparative Analysis of 10 Controllers Across ML and RL Families
+                Research-grade benchmark: 14 controllers across ML &amp; RL families &mdash; including
+                Double Dueling DQN, A2C, SAC, MADDPG multi-agent, and Recurrent PPO (LSTM).
+                11 demand profiles &bull; EPA fuel &amp; CO&#8322; tracking &bull; Holm-Bonferroni statistics.
             </div>
-            <span class="pill">10 Controllers</span>
+            <span class="pill">14 Controllers</span>
             <span class="pill">5-Fold CV</span>
-            <span class="pill">Mann-Whitney U Tests</span>
-            <span class="pill">Ablation Study</span>
-            <span class="pill">66 Unit Tests</span>
+            <span class="pill">Holm-Bonferroni</span>
+            <span class="pill">Bootstrap CI</span>
+            <span class="pill">PER + Dueling DQN</span>
+            <span class="pill">MADDPG Multi-Agent</span>
+            <span class="pill">EPA CO&#8322; Tracking</span>
+            <span class="pill">11 Demand Profiles</span>
             {source_text}
         </div>
         """,
@@ -961,12 +1334,13 @@ def _render_stats_tab(data: DashboardData) -> None:
     st.markdown("#### Pairwise Significance Tests")
     st.caption(
         "Mann-Whitney U test results comparing each controller pair. "
-        "A p-value ≤ alpha means the difference is statistically significant."
+        "Holm-Bonferroni correction controls the family-wise error rate across all pairwise comparisons."
     )
     if data.significance_df.empty:
         st.info("No significance test output found.")
     else:
-        alpha = st.slider(
+        stat_ctrl1, stat_ctrl2, stat_ctrl3 = st.columns(3)
+        alpha = stat_ctrl1.slider(
             "Alpha Threshold",
             min_value=0.001,
             max_value=0.200,
@@ -974,20 +1348,60 @@ def _render_stats_tab(data: DashboardData) -> None:
             step=0.001,
             key="alpha_threshold",
         )
+        correction_method = stat_ctrl2.selectbox(
+            "Multiple Comparison Correction",
+            ["holm", "bonferroni", "none"],
+            index=0,
+            key="correction_method",
+            help="Holm-Bonferroni (recommended): step-down procedure with higher power than Bonferroni.",
+        )
+        sort_col = stat_ctrl3.selectbox(
+            "Sort By",
+            ["p_adjusted", "p_value", "effect_size_r", "cohens_d_equiv"],
+            index=0,
+            key="sig_sort_col",
+        )
+
         significance_view = data.significance_df.copy()
         if "controller_a" in significance_view.columns:
             significance_view["controller_a"] = significance_view["controller_a"].apply(_display_controller_name)
         if "controller_b" in significance_view.columns:
             significance_view["controller_b"] = significance_view["controller_b"].apply(_display_controller_name)
+
+        # Re-apply correction live with chosen method
         if "p_value" in significance_view.columns:
-            significance_view["passes_alpha"] = significance_view["p_value"] <= alpha
-            significance_view = significance_view.sort_values("p_value", ascending=True)
-            n_significant = int(significance_view["passes_alpha"].sum())
+            from traffic_ai.metrics.statistics import _apply_correction
+            significance_view = _apply_correction(significance_view, alpha=alpha, method=correction_method)
+            if sort_col in significance_view.columns:
+                significance_view = significance_view.sort_values(sort_col, ascending=True)
+            n_significant = int(significance_view.get("significant", pd.Series(dtype=bool)).sum())
+            n_total = len(significance_view)
             st.caption(
-                f"{n_significant} out of {len(significance_view)} comparisons "
-                f"are significant at alpha = {alpha:.3f}."
+                f"{n_significant} of {n_total} comparisons significant at α={alpha:.3f} "
+                f"after {correction_method} correction."
             )
         st.dataframe(significance_view, use_container_width=True, height=310)
+
+    # Bootstrap CI table
+    st.markdown("#### Bootstrap Confidence Intervals (95%)")
+    st.caption(
+        "2,000-resample bootstrap CIs for mean and median per controller. "
+        "Non-overlapping CIs indicate practically meaningful differences."
+    )
+    if not data.step_df.empty and "avg_wait_sec" in data.step_df.columns:
+        from traffic_ai.metrics.statistics import controller_bootstrap_table
+        boot_metric = st.selectbox(
+            "Metric for Bootstrap CI",
+            [c for c in ["avg_wait_sec", "total_queue", "throughput", "efficiency_score"] if c in data.step_df.columns],
+            key="boot_metric_select",
+        )
+        boot_df = controller_bootstrap_table(data.step_df, metric=boot_metric, n_bootstrap=2_000)
+        if not boot_df.empty:
+            if "controller" in boot_df.columns:
+                boot_df["controller"] = boot_df["controller"].apply(_display_controller_name)
+            st.dataframe(boot_df, use_container_width=True, height=280)
+    else:
+        st.info("Step-level data required for bootstrap CIs.")
 
     st.markdown("#### Adaptive Controller Ablation Study")
     st.caption(
@@ -1095,8 +1509,8 @@ def _render_tables_tab(data: DashboardData) -> None:
 # ---------------------------------------------------------------------------
 
 def _render_benchmark_lab(data: DashboardData) -> None:
-    tab_research, tab_overview, tab_stats, tab_plots, tab_tables = st.tabs(
-        ["Research Summary", "Overview", "Statistics", "Plots", "Raw Tables"]
+    tab_research, tab_overview, tab_stats, tab_env, tab_controllers, tab_plots, tab_tables = st.tabs(
+        ["Research Summary", "Overview", "Statistics", "Environmental Impact", "Controllers", "Plots", "Raw Tables"]
     )
     with tab_research:
         _render_research_overview(data)
@@ -1104,6 +1518,10 @@ def _render_benchmark_lab(data: DashboardData) -> None:
         _render_overview_tab(data)
     with tab_stats:
         _render_stats_tab(data)
+    with tab_env:
+        _render_environmental_impact(data)
+    with tab_controllers:
+        _render_controller_cards()
     with tab_plots:
         _render_plots_tab(data)
     with tab_tables:
@@ -1249,7 +1667,24 @@ def _render_live_simulation_panel(settings: Settings) -> None:
         "This uses the core traffic simulation engine directly — no pre-trained models needed."
     )
 
-    demand_profiles = ["normal", "rush_hour", "midday_peak"]
+    demand_profiles = [
+        "normal", "rush_hour", "midday_peak", "weekend", "school_zone",
+        "event_surge", "construction", "emergency_priority",
+        "high_density_developing", "incident_response", "weather_degraded",
+    ]
+    profile_descriptions = {
+        "normal": "Mild sinusoidal variation around a 0.12 veh/s base",
+        "rush_hour": "Twin Gaussian peaks at 8 AM and 5:30 PM (1.6× scaling)",
+        "midday_peak": "Single gentle lunchtime peak at 1 PM",
+        "weekend": "Reduced base volume, single mid-day hump (no commute spikes)",
+        "school_zone": "Sharp narrow spikes at 7:45 AM and 3:00 PM (NS-only)",
+        "event_surge": "Pre/post-event traffic surges (e.g. stadium, concert)",
+        "construction": "East-West capacity reduced; arrivals elevated",
+        "emergency_priority": "Random emergency vehicle events every ~500 steps",
+        "high_density_developing": "High base rate (3× normal) with non-compliant vehicles",
+        "incident_response": "Capacity loss at step 300 on one direction for 200 steps",
+        "weather_degraded": "Higher arrivals, lower service (rain conditions)",
+    }
     configured_profile = str(settings.get("simulation.demand_profile", "rush_hour"))
     profile_index = (
         demand_profiles.index(configured_profile)
@@ -1257,15 +1692,27 @@ def _render_live_simulation_panel(settings: Settings) -> None:
         else 1
     )
 
+    live_controller_options = [
+        "Adaptive Rule",
+        "Fixed Timing",
+        "Q-Learning (RL)",
+        "DQN (RL)",
+        "A2C (RL)",
+        "SAC (RL)",
+        "MADDPG Multi-Agent (RL)",
+        "Recurrent PPO (RL)",
+        "Random Forest (ML)",
+    ]
+
     with st.form("live_sim_form"):
         row1_col1, row1_col2, row1_col3 = st.columns(3)
         controller_label = row1_col1.selectbox(
             "Controller",
-            ["Adaptive Rule", "Fixed Timing", "Q-Learning (RL)", "DQN (RL)", "Random Forest (ML)"],
+            live_controller_options,
             help=(
                 "Adaptive Rule dynamically adjusts green time based on queue length. "
                 "Fixed Timing uses a constant 30s cycle. "
-                "Q-Learning, DQN, and Random Forest are AI controllers trained on-the-fly."
+                "A2C, SAC, MADDPG, RecurrentPPO are research-grade RL controllers trained on-the-fly."
             ),
         )
         sim_steps = int(row1_col2.slider("Simulation Steps", 100, 3000, 800, 100))
@@ -1293,7 +1740,7 @@ def _render_live_simulation_panel(settings: Settings) -> None:
             "Demand Profile",
             demand_profiles,
             index=profile_index,
-            help="Rush hour applies 2.5× demand scaling during peak periods.",
+            help="\n".join(f"{k}: {v}" for k, v in profile_descriptions.items()),
         )
         demand_scale = float(
             row2_col3.slider(
@@ -1338,6 +1785,46 @@ def _render_live_simulation_panel(settings: Settings) -> None:
             env = SignalControlEnv(EnvConfig(seed=settings.seed))
             policy, _, _ = train_dqn(env, episodes=220, seed=settings.seed)
         controller = RLPolicyController(policy=policy, name="rl_dqn")
+    elif controller_label == "A2C (RL)":
+        from traffic_ai.rl_models.a2c import train_a2c
+        with st.spinner("Training A2C agent (Advantage Actor-Critic)..."):
+            controller = train_a2c(
+                n_intersections=intersections,
+                demand_profile=demand_profile,
+                steps_per_episode=min(sim_steps, 500),
+                n_episodes=60,
+                seed=settings.seed,
+            )
+    elif controller_label == "SAC (RL)":
+        from traffic_ai.rl_models.sac import train_sac
+        with st.spinner("Training SAC agent (Soft Actor-Critic)..."):
+            controller = train_sac(
+                n_intersections=intersections,
+                demand_profile=demand_profile,
+                steps_per_episode=min(sim_steps, 500),
+                n_episodes=80,
+                seed=settings.seed,
+            )
+    elif controller_label == "MADDPG Multi-Agent (RL)":
+        from traffic_ai.rl_models.maddpg import train_maddpg
+        with st.spinner("Training MADDPG multi-agent controller..."):
+            controller = train_maddpg(
+                n_intersections=intersections,
+                demand_profile=demand_profile,
+                steps_per_episode=min(sim_steps, 500),
+                n_episodes=80,
+                seed=settings.seed,
+            )
+    elif controller_label == "Recurrent PPO (RL)":
+        from traffic_ai.rl_models.recurrent_ppo import train_recurrent_ppo
+        with st.spinner("Training Recurrent PPO (LSTM) agent..."):
+            controller = train_recurrent_ppo(
+                n_intersections=intersections,
+                demand_profile=demand_profile,
+                steps_per_episode=min(sim_steps, 500),
+                n_episodes=60,
+                seed=settings.seed,
+            )
     elif controller_label == "Random Forest (ML)":
         from sklearn.ensemble import RandomForestClassifier
         from traffic_ai.rl_models.environment import EnvConfig, SignalControlEnv
@@ -1368,6 +1855,14 @@ def _render_live_simulation_panel(settings: Settings) -> None:
     kpi2.metric("Avg Queue", f"{aggregate.get('average_queue_length', 0.0):.2f}")
     kpi3.metric("Throughput", f"{aggregate.get('average_throughput', 0.0):.2f}")
     kpi4.metric("Fairness", f"{aggregate.get('average_fairness', 0.0):.3f}")
+
+    fuel_gal = aggregate.get("total_fuel_gallons", 0.0)
+    co2_kg = aggregate.get("total_co2_kg", 0.0)
+    trees_equiv = co2_kg / 22.0
+    ekpi1, ekpi2, ekpi3 = st.columns(3)
+    ekpi1.metric("Total Fuel (gal)", f"{fuel_gal:.3f}", help="EPA MOVES3 idle + stop-start + moving fuel")
+    ekpi2.metric("Total CO\u2082 (kg)", f"{co2_kg:.2f}", help="8.887 kg CO\u2082 per gallon burned")
+    ekpi3.metric("Tree-Years Equiv.", f"{trees_equiv:.1f}", help="CO\u2082 reduction in tree-years (~22 kg/tree/yr)")
 
     metric_cols = [
         col

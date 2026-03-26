@@ -18,10 +18,14 @@ from traffic_ai.controllers.ml_controllers import (
     LSTMForecastController,
 )
 from traffic_ai.controllers.rl_controllers import (
+    A2CController,
     DQNController,
     PPOController,
     QLearningController,
+    RecurrentPPOController,
+    SACController,
 )
+from traffic_ai.controllers.maddpg_controller import MADDPGController
 
 
 # ---------------------------------------------------------------------------
@@ -244,3 +248,135 @@ def test_imitation_learning_fit_and_predict() -> None:
     assert "final_loss" in metrics
     action = ctrl.select_action(_make_obs())
     assert action in (0, 1)
+
+
+# ---------------------------------------------------------------------------
+# New RL controllers (WS2): A2C, SAC, MADDPG, RecurrentPPO
+# ---------------------------------------------------------------------------
+
+def _make_full_obs(n: int = 4, step: int = 0) -> dict[int, dict[str, float]]:
+    """Build a full multi-intersection observation dict."""
+    return {
+        i: {
+            "intersection_id": float(i),
+            "sim_step": float(step),
+            "queue_ns": float(5 + i),
+            "queue_ew": float(3 + i),
+            "total_queue": float(8 + 2 * i),
+            "phase_ns": 1.0,
+            "phase_ew": 0.0,
+            "phase_elapsed": float(step % 30),
+            "arrivals": float(step * 10),
+            "departures": float(step * 8),
+            "wait_sec": float(step * 10.0),
+            "emergency_active": 0.0,
+        }
+        for i in range(n)
+    }
+
+
+def test_a2c_compute_actions_valid() -> None:
+    n = 4
+    ctrl = A2CController()
+    ctrl.reset(n)
+    obs = _make_full_obs(n, step=0)
+    actions = ctrl.compute_actions(obs, step=0)
+    assert len(actions) == n
+    for phase in actions.values():
+        assert phase in ("NS", "EW")
+
+
+def test_a2c_runs_multiple_steps() -> None:
+    n = 2
+    ctrl = A2CController()
+    ctrl.reset(n)
+    for step in range(10):
+        obs = _make_full_obs(n, step=step)
+        actions = ctrl.compute_actions(obs, step=step)
+        assert len(actions) == n
+
+
+def test_sac_compute_actions_valid() -> None:
+    n = 4
+    ctrl = SACController()
+    ctrl.reset(n)
+    obs = _make_full_obs(n, step=0)
+    actions = ctrl.compute_actions(obs, step=0)
+    assert len(actions) == n
+    for phase in actions.values():
+        assert phase in ("NS", "EW")
+
+
+def test_sac_runs_multiple_steps() -> None:
+    n = 2
+    ctrl = SACController()
+    ctrl.reset(n)
+    for step in range(10):
+        obs = _make_full_obs(n, step=step)
+        actions = ctrl.compute_actions(obs, step=step)
+        assert len(actions) == n
+
+
+def test_maddpg_compute_actions_valid() -> None:
+    n = 4
+    ctrl = MADDPGController(n_intersections=n)
+    ctrl.reset(n)
+    obs = _make_full_obs(n, step=0)
+    actions = ctrl.compute_actions(obs, step=0)
+    assert len(actions) == n
+    for phase in actions.values():
+        assert phase in ("NS", "EW")
+
+
+def test_maddpg_uses_neighbor_topology() -> None:
+    """MADDPG with neighbor topology should still return valid actions."""
+    n = 4
+    neighbors = {
+        0: {"N": None, "S": 2, "E": 1, "W": None},
+        1: {"N": None, "S": 3, "E": None, "W": 0},
+        2: {"N": 0, "S": None, "E": 3, "W": None},
+        3: {"N": 1, "S": None, "E": None, "W": 2},
+    }
+    ctrl = MADDPGController(n_intersections=n, neighbors=neighbors)
+    ctrl.reset(n)
+    obs = _make_full_obs(n, step=0)
+    actions = ctrl.compute_actions(obs, step=0)
+    assert len(actions) == n
+    for phase in actions.values():
+        assert phase in ("NS", "EW")
+
+
+def test_recurrent_ppo_compute_actions_valid() -> None:
+    n = 4
+    ctrl = RecurrentPPOController()
+    ctrl.reset(n)
+    obs = _make_full_obs(n, step=0)
+    actions = ctrl.compute_actions(obs, step=0)
+    assert len(actions) == n
+    for phase in actions.values():
+        assert phase in ("NS", "EW")
+
+
+def test_recurrent_ppo_maintains_hidden_states() -> None:
+    """RecurrentPPO should preserve hidden state across steps."""
+    n = 2
+    ctrl = RecurrentPPOController()
+    ctrl.reset(n)
+    for step in range(20):
+        obs = _make_full_obs(n, step=step)
+        actions = ctrl.compute_actions(obs, step=step)
+        assert len(actions) == n
+
+
+def test_new_rl_controllers_reset_cleanly() -> None:
+    """All new RL controllers should handle reset without error."""
+    for CtrlCls in [A2CController, SACController, RecurrentPPOController]:
+        ctrl = CtrlCls()
+        ctrl.reset(4)
+        ctrl.reset(2)  # second reset should also work
+
+
+def test_maddpg_reset_cleanly() -> None:
+    ctrl = MADDPGController()
+    ctrl.reset(4)
+    ctrl.reset(4)  # second reset should rebuild networks cleanly
