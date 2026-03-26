@@ -95,16 +95,16 @@ def _inject_custom_theme() -> None:
     st.markdown(
         """
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap');
 
         :root {
-            --ink: #e8f0f2;
-            --muted: #8fa8b4;
-            --line: #2a3f4d;
-            --card: rgba(20, 38, 50, 0.85);
-            --accent: #0fc5c8;
-            --accent-2: #ee9b00;
-            --bg-base: #0d1e28;
+            --ink: #ecf2f6;
+            --muted: #91aabb;
+            --line: #1e3040;
+            --card: rgba(18, 34, 48, 0.85);
+            --accent: #38bdf8;
+            --accent-2: #fbbf24;
+            --bg-base: #0d1b2a;
         }
 
         html, body,
@@ -117,7 +117,7 @@ def _inject_custom_theme() -> None:
         [data-testid="stAppViewContainer"] h6,
         [data-testid="stAppViewContainer"] label,
         [data-testid="stAppViewContainer"] [data-testid="stMarkdownContainer"] {
-            font-family: "Space Grotesk", sans-serif;
+            font-family: "DM Sans", -apple-system, BlinkMacSystemFont, sans-serif;
         }
 
         .stApp {
@@ -177,26 +177,32 @@ def _inject_custom_theme() -> None:
         }
 
         .stButton > button {
-            border-radius: 999px;
-            border: 1px solid #0fc5c833;
+            border-radius: 8px;
+            border: 1px solid rgba(56, 189, 248, 0.25);
             color: var(--ink);
+            transition: all 0.2s;
+        }
+
+        .stButton > button:hover {
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+            transform: translateY(-1px);
         }
 
         .stButton > button[kind="primary"] {
-            background: linear-gradient(135deg, var(--accent) 0%, #0a8f92 100%);
-            color: #0d1e28;
+            background: linear-gradient(135deg, var(--accent) 0%, #1e9fd4 100%);
+            color: #0d1b2a;
             font-weight: 600;
-            border: 1px solid #0fc5c866;
+            border: none;
         }
 
         .hero {
-            color: #f0fafa;
-            border-radius: 18px;
-            border: 1px solid #0fc5c830;
+            color: #ecf2f6;
+            border-radius: 16px;
+            border: 1px solid rgba(56, 189, 248, 0.18);
             padding: 1.25rem 1.35rem;
             margin-bottom: 0.95rem;
-            background: linear-gradient(120deg, #0f4f5299 0%, #1a3f5ccc 100%);
-            box-shadow: 0 20px 38px #00000044;
+            background: linear-gradient(120deg, rgba(18, 52, 72, 0.7) 0%, rgba(15, 34, 58, 0.85) 100%);
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
         }
 
         .hero-title {
@@ -218,31 +224,31 @@ def _inject_custom_theme() -> None:
             margin-right: 0.45rem;
             margin-top: 0.7rem;
             border-radius: 999px;
-            border: 1px solid #0fc5c855;
-            padding: 0.24rem 0.66rem;
-            font-size: 0.78rem;
-            background: #0fc5c820;
-            color: #a8e8ec;
-            letter-spacing: 0.02em;
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            padding: 0.24rem 0.72rem;
+            font-size: 0.8rem;
+            background: rgba(56, 189, 248, 0.1);
+            color: #a8daf5;
+            letter-spacing: 0;
         }
 
         .source-note {
             margin-top: 0.6rem;
-            font-family: "IBM Plex Mono", monospace;
+            font-family: "DM Mono", monospace;
             font-size: 0.78rem;
             color: #7ab8c0;
         }
 
         .finding-card {
-            border-radius: 14px;
-            border: 1px solid #0fc5c840;
+            border-radius: 12px;
+            border: 1px solid rgba(56, 189, 248, 0.2);
             padding: 1rem 1.2rem;
             margin-bottom: 0.7rem;
-            background: rgba(15, 197, 200, 0.07);
+            background: rgba(56, 189, 248, 0.05);
         }
 
         .finding-card h4 {
-            color: #0fc5c8;
+            color: #7dd3f8;
             margin-bottom: 0.3rem;
             font-size: 0.95rem;
             font-weight: 600;
@@ -265,7 +271,7 @@ def _inject_custom_theme() -> None:
         .onboard-step .step-num {
             font-size: 1.5rem;
             font-weight: 700;
-            color: #0fc5c8;
+            color: #38bdf8;
             line-height: 1;
         }
 
@@ -292,10 +298,10 @@ def _inject_custom_theme() -> None:
             margin-left: 0.3rem;
         }
 
-        .badge-fixed  { background: #6b7f8e33; color: #9ab4c0; border: 1px solid #6b7f8e66; }
-        .badge-ml     { background: #ee9b0033; color: #f5c060; border: 1px solid #ee9b0066; }
-        .badge-rl     { background: #9b59b633; color: #c39bd3; border: 1px solid #9b59b666; }
-        .badge-adaptive { background: #0fc5c833; color: #a8e8ec; border: 1px solid #0fc5c866; }
+        .badge-fixed  { background: rgba(107,127,142,0.18); color: #9ab4c0; border: 1px solid rgba(107,127,142,0.35); }
+        .badge-ml     { background: rgba(251,191,36,0.12);  color: #f5c060; border: 1px solid rgba(251,191,36,0.3); }
+        .badge-rl     { background: rgba(155,89,182,0.15);  color: #c39bd3; border: 1px solid rgba(155,89,182,0.35); }
+        .badge-adaptive { background: rgba(56,189,248,0.12); color: #a8daf5; border: 1px solid rgba(56,189,248,0.3); }
         </style>
         """,
         unsafe_allow_html=True,

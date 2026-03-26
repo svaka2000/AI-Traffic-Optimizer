@@ -32,33 +32,33 @@ st.set_page_config(
 # ---------------------------------------------------------------------------
 THEME_CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap');
 
 :root {
-    --navy: #0A1628;
-    --navy-light: #0F2035;
-    --navy-card: rgba(15, 32, 53, 0.92);
-    --teal: #00C2CB;
-    --teal-dim: rgba(0, 194, 203, 0.15);
-    --teal-glow: rgba(0, 194, 203, 0.3);
-    --gold: #F0B429;
-    --gold-dim: rgba(240, 180, 41, 0.15);
-    --text-primary: #E8F4F8;
-    --text-secondary: #8BA4B4;
-    --text-muted: #5A7080;
-    --border: rgba(0, 194, 203, 0.2);
-    --danger: #FF6B6B;
-    --success: #51CF66;
+    --navy: #0D1B2A;
+    --navy-light: #132230;
+    --navy-card: rgba(18, 34, 48, 0.88);
+    --teal: #38BDF8;
+    --teal-dim: rgba(56, 189, 248, 0.12);
+    --teal-glow: rgba(56, 189, 248, 0.2);
+    --gold: #FBBF24;
+    --gold-dim: rgba(251, 191, 36, 0.12);
+    --text-primary: #ECF2F6;
+    --text-secondary: #91AABB;
+    --text-muted: #607A8A;
+    --border: rgba(56, 189, 248, 0.15);
+    --danger: #F87171;
+    --success: #4ADE80;
 }
 
 html, body,
 [data-testid="stAppViewContainer"],
 [data-testid="stAppViewContainer"] * {
-    font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif !important;
+    font-family: "DM Sans", -apple-system, BlinkMacSystemFont, sans-serif !important;
 }
 
 code, pre, [data-testid="stCode"] {
-    font-family: "JetBrains Mono", monospace !important;
+    font-family: "DM Mono", monospace !important;
 }
 
 .stApp {
@@ -94,9 +94,7 @@ div[data-testid="stMetricValue"] {
 div[data-testid="stMetricLabel"] {
     color: var(--text-secondary) !important;
     font-weight: 500 !important;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    font-size: 0.75rem !important;
+    font-size: 0.8rem !important;
 }
 
 div[data-testid="stMetricDelta"] > div {
@@ -128,7 +126,8 @@ p, label, span { color: var(--text-primary); }
 }
 .stButton > button:hover {
     border-color: var(--teal);
-    box-shadow: 0 0 20px var(--teal-dim);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+    transform: translateY(-1px);
 }
 .stButton > button[kind="primary"] {
     background: linear-gradient(135deg, var(--teal) 0%, #00A0A8 100%);
@@ -154,7 +153,8 @@ p, label, span { color: var(--text-primary); }
 }
 .stat-card:hover {
     border-color: var(--teal);
-    box-shadow: 0 8px 32px rgba(0, 194, 203, 0.1);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    transform: translateY(-2px);
 }
 
 .stat-value {
@@ -174,11 +174,10 @@ p, label, span { color: var(--text-primary); }
 }
 
 .stat-label {
-    font-size: 0.8rem;
+    font-size: 0.82rem;
     color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-weight: 600;
+    font-weight: 500;
+    letter-spacing: 0.01em;
 }
 
 .stat-sublabel {
@@ -228,9 +227,9 @@ p, label, span { color: var(--text-primary); }
     display: inline-block;
     padding: 4px 12px;
     border-radius: 100px;
-    font-size: 0.72rem;
-    font-weight: 600;
-    letter-spacing: 0.04em;
+    font-size: 0.78rem;
+    font-weight: 500;
+    letter-spacing: 0.01em;
     margin-right: 8px;
     margin-bottom: 6px;
 }
@@ -255,12 +254,12 @@ p, label, span { color: var(--text-primary); }
 
 /* Section headers */
 .section-header {
-    font-size: 1.1rem;
-    font-weight: 700;
+    font-size: 1.05rem;
+    font-weight: 600;
     color: var(--text-primary);
     margin: 24px 0 12px 0;
     padding-bottom: 8px;
-    border-bottom: 2px solid var(--teal-dim);
+    border-bottom: 1px solid var(--border);
 }
 
 /* Comparison table */
@@ -340,16 +339,15 @@ def render_hero() -> None:
         <div class="hero-banner">
             <div class="hero-title">TrafficAI</div>
             <div class="hero-subtitle">
-                Intelligent Signal Optimization Platform — AI-powered traffic signal control
-                for San Diego corridors. Reducing congestion, emissions, and emergency response times
-                through reinforcement learning and predictive analytics.
+                AI-powered traffic signal control for San Diego corridors — cutting congestion,
+                emissions, and emergency response times using reinforcement learning.
             </div>
-            <span class="hero-badge badge-teal">DUELING DQN</span>
-            <span class="hero-badge badge-teal">PREDICTIVE ANALYTICS</span>
-            <span class="hero-badge badge-gold">EMERGENCY PREEMPTION</span>
-            <span class="hero-badge badge-gold">EPA EMISSIONS TRACKING</span>
-            <span class="hero-badge badge-neutral">5-INTERSECTION CORRIDOR</span>
-            <span class="hero-badge badge-neutral">REAL-TIME SIMULATION</span>
+            <span class="hero-badge badge-teal">Dueling DQN</span>
+            <span class="hero-badge badge-teal">Predictive Analytics</span>
+            <span class="hero-badge badge-gold">Emergency Preemption</span>
+            <span class="hero-badge badge-gold">Emissions Tracking</span>
+            <span class="hero-badge badge-neutral">5-Intersection Corridor</span>
+            <span class="hero-badge badge-neutral">Real-time Simulation</span>
         </div>
         """,
         unsafe_allow_html=True,
