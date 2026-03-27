@@ -14,6 +14,7 @@ from traffic_ai.controllers import (
     merge_controller_sets,
 )
 from traffic_ai.data_pipeline import TrafficDataPipeline
+from traffic_ai.data_pipeline.pipeline import DataPipelineResult
 from traffic_ai.metrics import (
     aggregate_experiment_rows,
     compute_system_efficiency_score,
@@ -58,31 +59,80 @@ class ExperimentRunner:
         self.plot_dir.mkdir(parents=True, exist_ok=True)
         self.model_dir.mkdir(parents=True, exist_ok=True)
 
+    # -------------------------------------------------------------------------
+    # Orchestrator: coordinates every phase of the experiment in sequence.
+    # -------------------------------------------------------------------------
     def run(
         self,
         ingest_only: bool = False,
         include_kaggle: bool = True,
         include_public: bool = True,
     ) -> ExperimentArtifacts:
-        data_pipeline = TrafficDataPipeline(self.settings)
-        data_result = data_pipeline.run(
+        """Orchestrates the full experiment pipeline end-to-end:
+        data ingestion → model training → simulation → statistics → artifact generation.
+        """
+        data_result = self._run_data_pipeline(include_kaggle, include_public)
+
+        if ingest_only:
+            return self._early_exit_artifacts()
+
+        supervised_metrics_df, supervised_controller_models = self._train_supervised_models(data_result)
+        rl_result = self._train_rl_policies()
+        controllers = self._build_controller_set(supervised_controller_models, rl_result)
+        all_steps, grouped_summary = self._run_cross_validated_simulations(controllers)
+        significance, bootstrap, ablation = self._compute_statistical_analysis(all_steps, grouped_summary)
+
+        return self._save_and_plot_artifacts(
+            grouped_summary=grouped_summary,
+            all_steps=all_steps,
+            significance=significance,
+            bootstrap=bootstrap,
+            ablation=ablation,
+            supervised_metrics_df=supervised_metrics_df,
+            rl_result=rl_result,
+            data_result=data_result,
+        )
+
+    # -------------------------------------------------------------------------
+    # SRP: Runs the full data pipeline (ingest → clean → engineer → preprocess).
+    # -------------------------------------------------------------------------
+    def _run_data_pipeline(
+        self,
+        include_kaggle: bool,
+        include_public: bool,
+    ) -> DataPipelineResult:
+        """Pulls raw traffic data from all sources and prepares a modeling-ready dataset."""
+        pipeline = TrafficDataPipeline(self.settings)
+        return pipeline.run(
             include_kaggle=include_kaggle,
             include_public=include_public,
             include_local_csv=True,
         )
-        if ingest_only:
-            dummy = self.result_dir / "ingestion_only.csv"
-            write_dataframe(pd.DataFrame({"status": ["completed"]}), dummy)
-            return ExperimentArtifacts(
-                summary_csv=dummy,
-                step_metrics_csv=dummy,
-                significance_csv=dummy,
-                ablation_csv=dummy,
-                model_metrics_csv=dummy,
-                generated_plots=[],
-                trained_model_dir=self.model_dir,
-            )
 
+    # -------------------------------------------------------------------------
+    # SRP: Returns a minimal artifact bundle when only data ingestion was requested.
+    # -------------------------------------------------------------------------
+    def _early_exit_artifacts(self) -> ExperimentArtifacts:
+        """Writes a placeholder CSV and returns stub artifacts for ingest-only mode."""
+        dummy = self.result_dir / "ingestion_only.csv"
+        write_dataframe(pd.DataFrame({"status": ["completed"]}), dummy)
+        return ExperimentArtifacts(
+            summary_csv=dummy,
+            step_metrics_csv=dummy,
+            significance_csv=dummy,
+            ablation_csv=dummy,
+            model_metrics_csv=dummy,
+            generated_plots=[],
+            trained_model_dir=self.model_dir,
+        )
+
+    # -------------------------------------------------------------------------
+    # SRP: Trains supervised ML models (Random Forest, XGBoost, MLP) on traffic data.
+    # -------------------------------------------------------------------------
+    def _train_supervised_models(
+        self, data_result: DataPipelineResult
+    ) -> tuple[pd.DataFrame, object]:
+        """Fits and evaluates supervised classifiers; also trains signal-controller wrappers."""
         supervised_suite = SupervisedModelSuite(seed=self.settings.seed)
         _, supervised_metrics_df = supervised_suite.train_and_evaluate(
             dataset=data_result.prepared_dataset,
@@ -90,29 +140,52 @@ class ExperimentRunner:
             cv_folds=self._cv_folds(),
             quick_mode=self.quick_run,
         )
-
         supervised_controller_models = train_supervised_controller_models(seed=self.settings.seed)
-        rl_result = train_rl_policy_suite(
+        return supervised_metrics_df, supervised_controller_models
+
+    # -------------------------------------------------------------------------
+    # SRP: Trains the full RL policy suite (Q-Learning, DQN, PPO, A2C, SAC, etc.).
+    # -------------------------------------------------------------------------
+    def _train_rl_policies(self) -> object:
+        """Runs the RL training loop for every configured algorithm and returns learned policies."""
+        return train_rl_policy_suite(
             output_dir=self.output_dir,
             seed=self.settings.seed,
             quick_run=self.quick_run,
         )
 
-        controllers = merge_controller_sets(
+    # -------------------------------------------------------------------------
+    # SRP: Assembles the full controller roster from all three families.
+    # -------------------------------------------------------------------------
+    def _build_controller_set(
+        self, supervised_controller_models: object, rl_result: object
+    ) -> list:
+        """Merges fixed/adaptive baselines, supervised wrappers, and trained RL policies."""
+        return merge_controller_sets(
             build_baseline_controllers(self.settings),
             build_supervised_controllers(supervised_controller_models),
             build_rl_controllers(rl_result.policies),
         )
 
+    # -------------------------------------------------------------------------
+    # SRP: Runs every controller over every CV fold and aggregates the results.
+    # -------------------------------------------------------------------------
+    def _run_cross_validated_simulations(
+        self, controllers: list
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Benchmarks all controllers across independent random-seed folds of the simulator."""
         step_frames: list[pd.DataFrame] = []
         summary_rows: list[dict[str, float | str]] = []
+
         for fold in range(self._cv_folds()):
             simulator = TrafficNetworkSimulator(self._simulator_config(seed_offset=fold))
             for controller in controllers:
                 sim_result = simulator.run(controller, steps=self._sim_steps())
+
                 step_df = simulation_result_to_step_dataframe(sim_result)
                 step_df["fold"] = fold
                 step_frames.append(step_df)
+
                 row = simulation_result_to_summary_row(sim_result)
                 row["fold"] = fold
                 summary_rows.append(row)
@@ -125,7 +198,15 @@ class ExperimentRunner:
             .sort_values("average_wait_time")
         )
         grouped_summary["system_efficiency_score"] = compute_system_efficiency_score(grouped_summary)
+        return all_steps, grouped_summary
 
+    # -------------------------------------------------------------------------
+    # SRP: Runs all statistical analyses on the simulation results.
+    # -------------------------------------------------------------------------
+    def _compute_statistical_analysis(
+        self, all_steps: pd.DataFrame, grouped_summary: pd.DataFrame
+    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        """Computes Holm-Bonferroni pairwise significance, bootstrap CI, and ablation results."""
         significance = pairwise_significance_tests(
             all_steps,
             metric_col="avg_wait_sec",
@@ -138,7 +219,23 @@ class ExperimentRunner:
             seed=self.settings.seed,
         )
         ablation = self._run_ablation_study()
+        return significance, bootstrap, ablation
 
+    # -------------------------------------------------------------------------
+    # SRP: Persists all result CSVs, generates all plots, and writes the run manifest.
+    # -------------------------------------------------------------------------
+    def _save_and_plot_artifacts(
+        self,
+        grouped_summary: pd.DataFrame,
+        all_steps: pd.DataFrame,
+        significance: pd.DataFrame,
+        bootstrap: pd.DataFrame,
+        ablation: pd.DataFrame,
+        supervised_metrics_df: pd.DataFrame,
+        rl_result: object,
+        data_result: DataPipelineResult,
+    ) -> ExperimentArtifacts:
+        """Writes all outputs to disk: CSVs, publication plots, and a JSON manifest."""
         summary_csv = write_dataframe(grouped_summary, self.result_dir / "controller_summary.csv")
         step_csv = write_dataframe(all_steps, self.result_dir / "controller_step_metrics.csv")
         significance_csv = write_dataframe(significance, self.result_dir / "significance_tests.csv")
@@ -148,23 +245,9 @@ class ExperimentRunner:
         )
         write_dataframe(bootstrap, self.result_dir / "bootstrap_wait_time_ci.csv")
 
-        generated_plots = [
-            plot_controller_performance(grouped_summary, self.plot_dir),
-            plot_queue_and_wait_curves(all_steps, self.plot_dir),
-            plot_traffic_heatmap(all_steps, self.plot_dir),
-            plot_learning_curves(rl_result.reward_history, self.plot_dir),
-            plot_model_metrics_table(supervised_metrics_df, self.plot_dir),
-        ]
-        write_json(
-            {
-                "quick_run": self.quick_run,
-                "cv_folds": self._cv_folds(),
-                "sim_steps": self._sim_steps(),
-                "source_files": [str(item.path) for item in data_result.source_results],
-                "cleaned_files": [str(path) for path in data_result.cleaned_files],
-            },
-            self.result_dir / "run_manifest.json",
-        )
+        generated_plots = self._generate_plots(grouped_summary, all_steps, rl_result, supervised_metrics_df)
+        self._write_run_manifest(data_result)
+
         return ExperimentArtifacts(
             summary_csv=summary_csv,
             step_metrics_csv=step_csv,
@@ -175,7 +258,43 @@ class ExperimentRunner:
             trained_model_dir=self.model_dir,
         )
 
+    # -------------------------------------------------------------------------
+    # SRP: Generates every publication-quality visualization for the experiment.
+    # -------------------------------------------------------------------------
+    def _generate_plots(
+        self,
+        grouped_summary: pd.DataFrame,
+        all_steps: pd.DataFrame,
+        rl_result: object,
+        supervised_metrics_df: pd.DataFrame,
+    ) -> list[Path]:
+        """Calls each specialized plot function and returns the list of written file paths."""
+        return [
+            plot_controller_performance(grouped_summary, self.plot_dir),
+            plot_queue_and_wait_curves(all_steps, self.plot_dir),
+            plot_traffic_heatmap(all_steps, self.plot_dir),
+            plot_learning_curves(rl_result.reward_history, self.plot_dir),
+            plot_model_metrics_table(supervised_metrics_df, self.plot_dir),
+        ]
+
+    # -------------------------------------------------------------------------
+    # SRP: Persists a JSON manifest documenting experiment settings and data provenance.
+    # -------------------------------------------------------------------------
+    def _write_run_manifest(self, data_result: DataPipelineResult) -> None:
+        """Records configuration, CV folds, sim steps, and all source/cleaned file paths."""
+        write_json(
+            {
+                "quick_run": self.quick_run,
+                "cv_folds": self._cv_folds(),
+                "sim_steps": self._sim_steps(),
+                "source_files": [str(item.path) for item in data_result.source_results],
+                "cleaned_files": [str(path) for path in data_result.cleaned_files],
+            },
+            self.result_dir / "run_manifest.json",
+        )
+
     def _run_ablation_study(self) -> pd.DataFrame:
+        """Grid-searches AdaptiveRuleController hyperparameters to measure sensitivity."""
         rows: list[dict[str, float | str]] = []
         queue_thresholds = [2.0, 6.0, 10.0]
         min_greens = [8, 15, 25]
@@ -194,6 +313,7 @@ class ExperimentRunner:
         return pd.DataFrame(rows).sort_values("average_wait_time")
 
     def _simulator_config(self, seed_offset: int = 0) -> SimulatorConfig:
+        """Builds a SimulatorConfig from settings, offset by fold index for reproducibility."""
         return SimulatorConfig(
             steps=self._sim_steps(),
             intersections=int(self.settings.get("simulation.intersections", 4)),
@@ -206,10 +326,12 @@ class ExperimentRunner:
         )
 
     def _sim_steps(self) -> int:
+        """Returns the number of simulation ticks, capped for quick-run mode."""
         base = int(self.settings.get("simulation.steps", 2000))
         return min(base, 260) if self.quick_run else base
 
     def _cv_folds(self) -> int:
+        """Returns the number of cross-validation folds based on run mode."""
         if self.quick_run:
             return max(2, int(self.settings.get("experiments.quick_run.cv_folds", 3)) - 1)
         return int(self.settings.get("experiments.full_run.cv_folds", 5))

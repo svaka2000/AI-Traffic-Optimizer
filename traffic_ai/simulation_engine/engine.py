@@ -122,8 +122,21 @@ class TrafficNetworkSimulator:
                     state.emergency_direction = ""
         return overridden
 
+    # -------------------------------------------------------------------------
+    # Orchestrator: sequences the four phases that make up one simulation tick.
+    # -------------------------------------------------------------------------
     def _advance_step(self, actions: dict[int, SignalPhase], step: int) -> None:
-        # 1) Apply pending inflow from upstream intersections.
+        """Orchestrates one simulation tick: inflow → signals → arrivals → service & propagation."""
+        self._apply_pending_inflow()
+        self._update_signal_phases(actions)
+        self._generate_stochastic_arrivals(step)
+        self._service_and_propagate()
+
+    # -------------------------------------------------------------------------
+    # SRP: Distributes buffered upstream flow into receiving lanes before the tick.
+    # -------------------------------------------------------------------------
+    def _apply_pending_inflow(self) -> None:
+        """Moves vehicles queued from the previous tick into a randomly chosen receiving lane."""
         for state in self.states.values():
             for direction, incoming in state.pending_inflow.items():
                 lane_index = int(self.rng.integers(0, self.config.lanes_per_direction))
@@ -133,7 +146,11 @@ class TrafficNetworkSimulator:
                 )
             state.pending_inflow = {}
 
-        # 2) Update phases.
+    # -------------------------------------------------------------------------
+    # SRP: Applies controller phase decisions and increments elapsed-phase counters.
+    # -------------------------------------------------------------------------
+    def _update_signal_phases(self, actions: dict[int, SignalPhase]) -> None:
+        """Commits the controller's chosen phase at each intersection; tracks phase changes."""
         for intersection_id, state in self.states.items():
             requested = actions.get(intersection_id, state.current_phase)
             if requested != state.current_phase:
@@ -143,12 +160,20 @@ class TrafficNetworkSimulator:
             else:
                 state.phase_elapsed += 1
 
-        # 3) Stochastic arrivals.
+    # -------------------------------------------------------------------------
+    # SRP: Samples new vehicle arrivals from a Poisson process for every direction.
+    # -------------------------------------------------------------------------
+    def _generate_stochastic_arrivals(self, step: int) -> None:
+        """Adds Poisson-distributed arrivals to each lane based on the current demand profile."""
         for state in self.states.values():
             for direction in ["N", "S", "E", "W"]:
                 self._sample_arrivals_for_direction(state, direction, step)
 
-        # 4) Service/departure and network propagation.
+    # -------------------------------------------------------------------------
+    # SRP: Services each intersection and routes departing vehicles to neighbors.
+    # -------------------------------------------------------------------------
+    def _service_and_propagate(self) -> None:
+        """Clears green-phase queues, then forwards 65% of departures to downstream intersections."""
         flow_to_neighbors: dict[tuple[int, Direction], float] = defaultdict(float)
         for intersection_id, state in self.states.items():
             departures_by_direction = self._service_intersection(state)

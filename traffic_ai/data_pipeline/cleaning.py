@@ -44,13 +44,17 @@ class DataCleaner:
         "avg_wait_sec",
     ]
 
+    # -------------------------------------------------------------------------
+    # Orchestrator: runs each cleaning step in the required order.
+    # -------------------------------------------------------------------------
     def clean_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-        normalized = self._normalize_columns(df)
-        normalized = self._ensure_columns(normalized)
-        normalized = self._coerce_types(normalized)
-        normalized = self._clip_outliers(normalized)
-        normalized = self._fill_missing(normalized)
-        normalized = normalized.drop_duplicates(
+        """Applies the full cleaning pipeline: normalise → ensure → coerce → clip → fill → dedup."""
+        normalized = self._normalize_columns(df)    # align heterogeneous column names
+        normalized = self._ensure_columns(normalized)  # add missing canonical columns
+        normalized = self._coerce_types(normalized)    # enforce correct dtypes
+        normalized = self._clip_outliers(normalized)   # remove statistical extremes
+        normalized = self._fill_missing(normalized)    # impute nulls per location group
+        normalized = normalized.drop_duplicates(       # keep last record per unique event
             subset=["timestamp", "location_id", "direction"], keep="last"
         ).sort_values("timestamp")
         return normalized.reset_index(drop=True)
@@ -69,14 +73,22 @@ class DataCleaner:
             outputs.append(target)
         return outputs
 
+    # -------------------------------------------------------------------------
+    # SRP: Maps heterogeneous source column names to the canonical schema.
+    # -------------------------------------------------------------------------
     def _normalize_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Lowercases and strips column names, then applies COLUMN_ALIASES remapping."""
         renamed = {
             col: COLUMN_ALIASES.get(col.strip().lower(), col.strip().lower())
             for col in df.columns
         }
         return df.rename(columns=renamed)
 
+    # -------------------------------------------------------------------------
+    # SRP: Adds any missing canonical columns with safe default values.
+    # -------------------------------------------------------------------------
     def _ensure_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Guarantees every required column exists before type coercion downstream."""
         copy = df.copy()
         if "timestamp" not in copy.columns:
             copy["timestamp"] = pd.date_range("2025-01-01", periods=len(copy), freq="5min")
@@ -98,7 +110,11 @@ class DataCleaner:
             copy["avg_wait_sec"] = np.nan
         return copy[self.canonical_columns]
 
+    # -------------------------------------------------------------------------
+    # SRP: Enforces correct Python/Pandas dtypes for every canonical column.
+    # -------------------------------------------------------------------------
     def _coerce_types(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Parses timestamps, uppercases direction codes, and converts numerics safely."""
         coerced = df.copy()
         coerced["timestamp"] = pd.to_datetime(coerced["timestamp"], errors="coerce")
         coerced["timestamp"] = coerced["timestamp"].ffill().fillna(pd.Timestamp("2025-01-01"))
@@ -110,7 +126,11 @@ class DataCleaner:
         coerced["signal_phase"] = coerced["signal_phase"].astype(str).str.upper()
         return coerced
 
+    # -------------------------------------------------------------------------
+    # SRP: Removes statistical extremes by clipping at the 1st and 99th percentiles.
+    # -------------------------------------------------------------------------
     def _clip_outliers(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Clips numeric sensor columns to the [P1, P99] range; pins occupancy to [0, 1]."""
         clipped = df.copy()
         for col in ["vehicle_count", "speed_kph", "queue_length", "avg_wait_sec"]:
             series = clipped[col].dropna()
@@ -122,7 +142,11 @@ class DataCleaner:
         clipped["occupancy"] = clipped["occupancy"].clip(0, 1)
         return clipped
 
+    # -------------------------------------------------------------------------
+    # SRP: Imputes null values using forward/backward fill within each location group.
+    # -------------------------------------------------------------------------
     def _fill_missing(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Forward-fills then back-fills per location; falls back to column median."""
         filled = df.copy()
         grouped = filled.groupby("location_id", group_keys=False)
         for col in ["vehicle_count", "speed_kph", "occupancy", "queue_length", "avg_wait_sec"]:
