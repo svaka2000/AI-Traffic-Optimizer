@@ -157,3 +157,52 @@ Deliver a modular, reproducible AI traffic optimization research platform with c
 ### Tests
 - [x] `tests/test_synthetic_generator.py`: 24 tests — columns, row caps, all 4 label strategies, scenario injection (incidents/weather/events shift distributions), full DatasetStore CRUD roundtrip, ModelTrainer DQN 5-episode smoke, Random Forest smoke.
 
+
+## AITO Platform Transformation — COMPLETE
+
+### Phase 0: AITO Branding — DONE
+- [x] All user-facing surfaces renamed to "AITO — AI Traffic Optimization".
+- [x] `main.py`, `api/server.py`, `AGENTS.md` updated.
+
+### Phase 1: Controller Cleanup — DONE
+- [x] Removed `LSTMForecastController`, `ImitationLearningController`, timeseries/LogisticRegression model.
+- [x] Added `BENCHMARK_CONTROLLERS` and `DEPLOYED_CONTROLLERS` registries in `controllers/__init__.py`.
+- [x] Tests updated; 125 tests pass.
+
+### Phase 2: 4-Phase Signal Model — DONE
+- [x] `SignalPhase` extended: NS_THROUGH, EW_THROUGH, NS_LEFT, EW_LEFT (+ legacy NS/EW).
+- [x] `left_queue_matrix` added to `IntersectionState`; left-turn saturation 1200 veh/hr/lane (HCM 7th ed.).
+- [x] All RL controllers updated to use `_PHASE_IDX_TO_STR` for 4-phase output.
+- [x] MADDPGController updated to N_ACTIONS=4.
+- [x] Tests widened to accept full 4-phase value set.
+
+### Phase 3: Multi-Objective Reward — DONE
+- [x] `SignalControlEnv` rewritten: 4-phase actions, 8-feature observations, 6-component reward.
+- [x] Components: avg_delay, ped_wait, emissions_co2, switch_penalty, throughput, left_starvation.
+- [x] Weights configurable in `default_config.yaml` under `rl.reward_weights`.
+- [x] `rl_models/dqn.py`, `q_learning.py`, `policy_gradient.py` updated to STATE_DIM=8, N_ACTIONS=4.
+
+### Phase 4: Sensor Fault Model — DONE
+- [x] `traffic_ai/simulation_engine/sensor.py`: `SensorFaultModel` (stuck/noise/dropout; PeMS-calibrated).
+- [x] `traffic_ai/controllers/fault_tolerant.py`: `FaultTolerantController` with EWMA imputation (α=0.3).
+- [x] 12 tests in `tests/test_sensor_fault.py`.
+
+### Phase 5: Shadow Mode — DONE
+- [x] `traffic_ai/shadow/shadow_runner.py`: `ShadowModeRunner` + `ShadowReport`.
+- [x] Production controller drives simulation; candidate logs counterfactuals only.
+- [x] `--shadow-mode`, `--shadow-production`, `--shadow-candidate` CLI flags in `main.py`.
+- [x] Output: `artifacts/shadow_report.json`.
+- [x] 7 tests in `tests/test_shadow_mode.py`.
+
+### Phase 6: Explainability Engine — DONE
+- [x] `traffic_ai/explainability/explainer.py`: `DecisionExplainer`.
+- [x] Sensitivity-based feature importances (Ribeiro et al., 2016 KDD).
+- [x] 1-3 sentence natural language explanations for all 4 signal phases.
+- [x] 11 tests in `tests/test_explainability.py`.
+
+### Phase 7: Dashboard Rewrite — DONE
+- [x] Full rewrite as AITO-branded 6-tab professional engineering dashboard.
+- [x] Dark navy/teal/gold color palette; CSS glassmorphism.
+- [x] Tabs: Network Overview, Benchmark Lab, Shadow Mode, Controller Training, Data & Calibration, Export.
+- [x] DecisionExplainer integrated in Controller Training tab.
+- [x] 155 tests pass.

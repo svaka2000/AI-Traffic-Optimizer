@@ -1,13 +1,14 @@
-# TrafficAI — Intelligent Signal Optimization Platform
+# AITO — AI Traffic Optimization
 
 <div align="center">
 
-**AI-powered traffic signal control for urban corridors**
-*Reducing congestion, emissions, and emergency response times through reinforcement learning and predictive analytics*
+**Professional engineering platform for traffic signal control research and deployment**
 
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+*4-phase signal model · Shadow mode deployment · Sensor fault tolerance · EPA MOVES2014b emissions*
+
+[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![Tests: 132](https://img.shields.io/badge/tests-132%20passing-brightgreen.svg)]()
+[![Tests: 155](https://img.shields.io/badge/tests-155%20passing-brightgreen.svg)]()
 
 </div>
 
@@ -15,270 +16,216 @@
 
 ## Overview
 
-TrafficAI is a research platform that benchmarks 10+ traffic signal controllers across four families — fixed timing, adaptive rule-based, supervised ML, and reinforcement learning — on simulated urban intersection networks. The system includes multi-intersection corridor simulation, predictive congestion forecasting, emergency vehicle preemption, and EPA-based emissions tracking.
+AITO benchmarks **14 traffic signal controllers** across four families — fixed timing, adaptive rule-based, supervised ML (RF, XGBoost, GBM, MLP), and reinforcement learning (Q-Learning, DQN, PPO, A2C, SAC, RecurrentPPO, MADDPG) — on simulated urban intersection networks.
 
-**Key Results:**
-- 🚦 **31% reduction** in average intersection delay vs fixed timing
-- 🌿 **4.2 tons CO₂ saved** per corridor per year
-- 🚑 **67% reduction** in emergency vehicle signal delay
-- 📈 **23% improvement** in average corridor speed
+The platform is designed for **traffic engineers**, not just researchers:
+
+- **4-phase signal model**: NS_THROUGH, EW_THROUGH, NS_LEFT, EW_LEFT with HCM 7th edition saturation flows
+- **Shadow mode**: evaluate AI controllers without touching live traffic
+- **Sensor fault tolerance**: EWMA imputation for stuck/noisy/dropout loop detectors
+- **EPA MOVES2014b emissions**: first-class CO₂ tracking, not a proxy
+- **Statistical rigor**: Holm-Bonferroni correction across all pairwise comparisons
+- **Explainability**: natural language decision explanations for any controller
 
 ---
 
 ## Architecture
 
 ```
-TrafficAI/
-├── traffic_ai/
-│   ├── simulation_engine/     # Stochastic multi-intersection grid simulator
-│   ├── simulation/            # Corridor simulation (El Camino Real, I-5, University Ave)
-│   │   ├── intersection.py    # N×M grid environment (Gym-compatible)
-│   │   └── corridor.py        # 5-intersection corridor with green wave optimization
-│   ├── controllers/           # 10+ signal control algorithms
-│   │   ├── fixed_timing.py    # Baseline: constant cycle
-│   │   ├── adaptive_rule.py   # Queue-threshold adaptive
-│   │   ├── ml_controller.py   # Supervised ML (RF, XGBoost, GBM, MLP)
-│   │   └── rl_controller.py   # RL policy wrapper
-│   ├── rl_models/             # Reinforcement learning suite
-│   │   ├── dqn.py             # Deep Q-Network
-│   │   ├── dueling_dqn.py     # ★ Dueling Double DQN (multi-objective reward)
-│   │   ├── q_learning.py      # Tabular Q-Learning
-│   │   └── policy_gradient.py # REINFORCE policy gradient
-│   ├── predictive/            # ★ Congestion forecasting (5-15 min horizon)
-│   ├── emissions/             # ★ EPA-based CO₂/fuel/NOx calculator
-│   ├── experiments/           # Benchmarking pipeline + A/B comparison engine
-│   ├── dashboard/             
-│   │   ├── streamlit_app.py   # Research dashboard (benchmark lab)
-│   │   └── caltrans_demo.py   # ★ Professional Caltrans demo dashboard
-│   ├── metrics/               # Statistical analysis (Mann-Whitney, bootstrap CI)
-│   ├── visualization/         # Publication-quality plots (300 DPI)
-│   ├── data_pipeline/         # Data ingestion and preprocessing
-│   └── config/                # YAML configuration
-├── docs/
-│   └── TECHNICAL_BRIEF.md     # ★ 1-page brief for government officials
-└── tests/                     # 132 unit tests
-```
-
-Items marked with ★ are new additions for the Caltrans demonstration.
-
----
-
-## Synthetic Data Studio
-
-The Data Studio is an interactive dashboard page for designing and generating custom synthetic traffic datasets, then training any controller directly on them — no Kaggle API key or real-world data required.
-
-### Key capabilities
-
-| Feature | Detail |
-|---------|--------|
-| **Configurable generator** | 35+ parameters: grid size, demand profile, peak multiplier, 5 scenario overlays (incidents, weather, events, school zones, emergency vehicles), directional ratio, signal compliance |
-| **4 label strategies** | `optimal` (simulation-based, best quality), `queue_balance` (heuristic, fast), `fixed` (alternating baseline), `adaptive_rule` (RuleBasedController) |
-| **Vectorised generation** | 100 k rows in < 5 s; pure NumPy, no Python row-loops |
-| **Persistent storage** | `DatasetStore` with atomic CRUD — save/load/rename/duplicate/delete/export CSV |
-| **One-click training** | Train any RL or ML controller on a saved dataset from within the dashboard |
-| **Live progress** | Animated `st.status()` + reward curve chart during RL training |
-
-### Usage
-
-1. Launch the dashboard: `streamlit run traffic_ai/dashboard/streamlit_app.py`
-2. Click the **Data Studio** tab.
-3. Click **Create New Dataset**, configure parameters, click **Generate Dataset**.
-4. Click **View** on a saved dataset card, then **Train Model →** to open the Training Workbench.
-5. Select a controller, configure hyperparameters, click **Start Training**.
-
-### Using a saved dataset in the pipeline
-
-```python
-from traffic_ai.data_pipeline.ingestion import DataIngestor
-from traffic_ai.config.settings import load_settings
-
-ingestor = DataIngestor(load_settings())
-artifacts = ingestor.ingest_all(synthetic_dataset_name="my_rush_hour_dataset")
+traffic_ai/
+├── controllers/           # 14 signal controllers (all implement BaseController)
+│   ├── base.py            # BaseController: reset, compute_actions, select_action, update
+│   ├── fixed.py           # Fixed timing baseline (30s cycle)
+│   ├── rule_based.py      # Queue-threshold adaptive
+│   ├── ml_controllers.py  # RF, XGBoost, GradientBoosting, MLP
+│   ├── rl_controllers.py  # QLearning, DQN, PPO, A2C, SAC, RecurrentPPO
+│   ├── maddpg_controller.py # Multi-agent MADDPG (centralized training)
+│   └── fault_tolerant.py  # EWMA-imputing fault wrapper
+├── simulation_engine/     # Physics + types (HCM 7th ed.)
+│   ├── engine.py          # TrafficNetworkSimulator
+│   ├── types.py           # SignalPhase (6 values), PHASE_TO_IDX, IntersectionState
+│   └── sensor.py          # SensorFaultModel (stuck/noise/dropout)
+├── rl_models/             # RL training
+│   ├── environment.py     # SignalControlEnv: 4-phase, 8-obs, 6-reward
+│   ├── dqn.py             # DQNetwork + train_dqn
+│   ├── q_learning.py      # QLearningPolicy + train_q_learning
+│   └── policy_gradient.py # PolicyNet + train_policy_gradient
+├── shadow/                # Shadow mode deployment
+│   └── shadow_runner.py   # ShadowModeRunner → artifacts/shadow_report.json
+├── explainability/        # AI transparency
+│   └── explainer.py       # DecisionExplainer — NL + feature importances
+├── dashboard/             # 6-tab Streamlit engineering dashboard
+│   └── streamlit_app.py
+├── data_pipeline/         # Ingestion, synthetic generation, PeMS calibration
+├── training/              # ModelTrainer (unified ML + RL)
+├── experiments/           # ExperimentRunner, Holm-Bonferroni
+└── config/                # Settings, default_config.yaml
 ```
 
 ---
 
-## Quick Start
+## Quickstart
 
 ```bash
-# Clone and setup
-git clone https://github.com/svaka2000/AI-Traffic-Optimizer.git
-cd AI-Traffic-Optimizer
-python -m venv .venv
-source .venv/bin/activate  # Linux/Mac
+# Install dependencies
 pip install -r requirements.txt
 
-# Run full benchmark (10 controllers, 5-fold CV)
+# Run quick benchmark (all controllers, ~2 min)
 python main.py --quick-run
 
-# Run with real Caltrans PeMS detector data calibration
-PEMS_API_KEY=<your_key> python main.py --pems-station 400456
+# Run full benchmark
+python main.py
 
-# Launch research dashboard
+# Launch the engineering dashboard
 streamlit run traffic_ai/dashboard/streamlit_app.py
 
-# Launch Caltrans demo dashboard (professional UI)
-streamlit run traffic_ai/dashboard/caltrans_demo.py
+# Shadow mode: evaluate DQN vs fixed timing without affecting simulation
+python main.py --shadow-mode --shadow-production fixed_timing --shadow-candidate dqn
 
 # Run tests
 pytest -q
 ```
 
-### CLI flags
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--quick-run` | off | Fewer episodes; skips slow training stages |
-| `--skip-kaggle` | off | Skip Kaggle dataset download |
-| `--pems-station STATION_ID` | `400456` | Caltrans PeMS station for arrival-rate calibration (falls back to synthetic if `PEMS_API_KEY` not set) |
-
 ---
 
-## Simulation Physics
+## CLI Reference
 
-All intersection physics are calibrated to HCM 7th Edition defaults:
+```
+python main.py [OPTIONS]
 
-| Parameter | Value | Source |
-|-----------|-------|--------|
-| Saturation flow rate | 1,800 veh/hr/lane | HCM 7th Ed., Table 19-9 |
-| Minimum green | 7 s | HCM 7th Ed., §19.4.3 |
-| Yellow clearance | 3 s | ITE recommended practice |
-| All-red clearance | 1 s | ITE recommended practice |
-| Turning movement factor | 0.60 | HCM-aligned |
-| Idle CO₂ rate | 0.000457 kg/s/vehicle | EPA MOVES2014b, Table 3.1 |
-
-The canonical simulation engine (`simulation_engine/engine.py`) is the single source of truth. `simulation/intersection.py` and `rl_models/environment.py` are thin wrappers — no physics duplication.
-
-### RL Action Space
-
-RL controllers use a **16-action** encoding (2 phases × 8 durations):
-
-| Action | Phase | Duration |
-|--------|-------|----------|
-| 0 | NS green | 15 s |
-| 1 | NS green | 20 s |
-| … | … | … |
-| 7 | NS green | 60 s |
-| 8 | EW green | 15 s |
-| … | … | … |
-| 15 | EW green | 60 s |
-
-The 6-dimensional observation vector is `[phase_elapsed/60, phase_ns, queue_ns/120, queue_ew/120, time_of_day_norm, upstream_queue/120]`.
-
-### Caltrans PeMS Integration
-
-`PeMSConnector` fetches real detector data (station, volume, occupancy, speed) for arrival-rate calibration. When `PEMS_API_KEY` is not set, it falls back automatically to a Gaussian-mixture synthetic profile calibrated to I-5 San Diego (station 400456).
-
-```python
-from traffic_ai.data_pipeline.pems_connector import PeMSConnector
-
-connector = PeMSConnector(station_id=400456)  # uses PEMS_API_KEY env var if present
-df = connector.fetch("2024-01-15", "2024-01-22")
-hourly_volumes = connector.calibration_by_hour(df)
+Options:
+  --config PATH             YAML configuration file (default: traffic_ai/config/default_config.yaml)
+  --quick-run               Reduced budget for fast iteration
+  --ingest-only             Run data ingestion only
+  --skip-kaggle             Disable Kaggle dataset ingestion
+  --skip-public             Disable public dataset ingestion
+  --output-dir DIR          Override artifact output directory
+  --pems-station STATION_ID Caltrans PeMS station for demand calibration
+                            (requires PEMS_API_KEY env var; default: 400456)
+  --shadow-mode             Run shadow mode evaluation
+  --shadow-production CTRL  Production controller (default: fixed_timing)
+  --shadow-candidate CTRL   Candidate AI controller (default: dqn)
 ```
 
 ---
 
-## AI Controllers
+## Signal Model
 
-### Dueling Double DQN (Primary)
+AITO uses a **4-phase protected signal model** (HCM 7th edition):
 
-The flagship controller uses a Dueling DQN architecture with:
+| Phase | SignalPhase | Serves | Saturation Flow |
+|-------|-------------|--------|----------------|
+| 0 | `NS_THROUGH` | N + S through + right | 1800 veh/hr/lane |
+| 1 | `EW_THROUGH` | E + W through + right | 1800 veh/hr/lane |
+| 2 | `NS_LEFT` | N + S protected left | 1200 veh/hr/lane |
+| 3 | `EW_LEFT` | E + W protected left | 1200 veh/hr/lane |
 
-- **Separate value/advantage streams** for more stable Q-value estimation
-- **Double DQN** to reduce action-value overestimation
-- **Multi-objective reward function** balancing:
-  - Wait time minimization
-  - Throughput maximization
-  - Queue balance across directions
-  - Phase switch penalty (stability)
-  - Emissions proxy (idle vehicle time)
-  - Emergency vehicle priority bonus
-
-### Controller Comparison (10 total)
-
-| Family | Controllers | Description |
-|--------|------------|-------------|
-| **Baseline** | Fixed Timing | Constant 30s/30s cycle |
-| **Adaptive** | Queue-Threshold | Switches on queue imbalance |
-| **Supervised ML** | Random Forest, XGBoost, Gradient Boosting, Neural Network | Trained on historical traffic patterns |
-| **Reinforcement Learning** | Q-Learning, DQN, Dueling DQN, Policy Gradient | Learn optimal policies through simulation |
+Legacy `"NS"` and `"EW"` strings remain valid for backward compatibility.
 
 ---
 
-## Corridor Simulation
+## Multi-Objective Reward
 
-Simulates real San Diego corridors with realistic parameters:
+RL controllers optimize a 6-component reward (configurable weights in `default_config.yaml`):
 
-| Corridor | Intersections | Speed Limit | AADT |
-|----------|--------------|-------------|------|
-| El Camino Real | 5 (Carmel Valley to Birmingham) | 40 mph | 32,000 |
-| University Ave | 5 (I-15 to College Ave) | 35 mph | 28,000 |
-| I-5 Surface | 5 (Palomar Airport to Mission Ave) | 45 mph | 45,000 |
+```
+R = -w1·avg_delay - w2·ped_wait - w3·emissions_co2 - switch_cost + w4·throughput - w5·left_starvation
 
-Features:
-- Poisson vehicle arrivals with AM/PM Gaussian peak profiles
-- Platoon dispersion between intersections (Robertson's model)
-- Emergency vehicle preemption with cascading green waves
-- EPA-standard emissions calculation (AP-42, MOVES3)
+Default: w1=0.12, w2=0.05, w3=0.03, switch_cost=2.0, w4=0.08, w5=0.04
+Source: Mannion et al. (2016) AAMAS workshop; Liang et al. (2019) ITSC
+```
 
 ---
 
-## Emissions Calculator
+## Shadow Mode
 
-Uses official EPA factors:
+Shadow mode allows safe evaluation of AI controllers **without modifying live traffic**:
 
-| Factor | Value | Source |
-|--------|-------|--------|
-| Idle fuel consumption | 0.16 gal/hr/vehicle | EPA MOVES3 |
-| CO₂ per gallon | 8.887 kg | EPA |
-| NOx per gallon | 1.39 g | EPA Tier 3 |
-| San Diego gas price | $4.89/gal | AAA 2025 avg |
+```python
+from traffic_ai.shadow.shadow_runner import ShadowModeRunner
+from traffic_ai.controllers.fixed import FixedTimingController
+from traffic_ai.controllers.rl_controllers import DQNController
 
----
-
-## Statistical Validation
-
-- **5-fold cross-validation** across all controllers
-- **Mann-Whitney U tests** (α=0.05) for pairwise significance
-- **Bootstrap confidence intervals** (95% CI, 300 resamples)
-- **Ablation study** for hyperparameter sensitivity
-- **132 unit tests** (pytest)
+runner = ShadowModeRunner(
+    production=FixedTimingController(),
+    candidate=DQNController(),
+)
+report = runner.run()
+# report.agreement_rate, report.estimated_queue_reduction_pct
+runner.save_report(report, Path("artifacts/shadow_report.json"))
+```
 
 ---
 
-## San Diego Context
+## Sensor Fault Tolerance
 
-San Diego County operates **3,000+ signalized intersections** coordinated across 18 cities by SANDAG. This platform demonstrates that AI-based signal optimization:
+```python
+from traffic_ai.simulation_engine.sensor import SensorFaultModel
+from traffic_ai.controllers.fault_tolerant import FaultTolerantController
 
-- Requires **no new hardware** — software-only deployment to NTCIP controllers
-- Produces **measurable** delay, emissions, and safety improvements
-- Is **scalable** from single corridor pilot to city-wide deployment
+fault = SensorFaultModel(stuck_prob=0.02, noise_std=0.05, dropout_prob=0.01)
+corrupted_obs = fault.apply(raw_obs, step=t, intersection_id=iid)
 
----
-
-## Data Sources
-
-| Source | Data Type | Access |
-|--------|-----------|--------|
-| [Caltrans PeMS](https://pems.dot.ca.gov/) | Real-time detector data, speed/flow/occupancy | Free account |
-| [SANDAG Open Data](https://opendata.sandag.org/) | Regional planning, traffic counts | Open |
-| [EPA MOVES3](https://www.epa.gov/moves) | Vehicle emission factors | Public |
-| Metro Interstate Traffic Dataset | Hourly traffic volume, weather | UCI ML Repository |
+# Wrap any controller for EWMA-based fault tolerance
+ctrl = FaultTolerantController(DQNController(), alpha=0.3)
+```
 
 ---
 
-## Author
+## Decision Explainability
 
-**Samarth Vaka** — San Diego, CA
-- 📧 vsamarth2010@gmail.com
-- 🔗 [github.com/svaka2000](https://github.com/svaka2000)
-- 🏆 GSDSEF 2nd Place + Special Recognition
-- 🏛️ SANDAG Regional Planning Committee Presenter
-- 🤝 Active contacts: Caltrans Division of Traffic Operations, City of San Diego Transportation
+```python
+from traffic_ai.explainability.explainer import DecisionExplainer
+
+explainer = DecisionExplainer(controller=ctrl)
+result = explainer.explain(obs, action=action)
+print(result.natural_language)
+# "Selected EW_THROUGH (eastbound/westbound green). Key driver: eastbound/westbound
+#  through queue (highest feature influence). EW queue (24 veh) exceeds NS queue
+#  (8 veh) — EW throughput prioritised."
+```
 
 ---
 
-## License
+## PeMS Calibration
 
-MIT License — see [LICENSE](LICENSE) for details.
+```bash
+export PEMS_API_KEY=your_key_here
+python main.py --pems-station 400456
+```
+
+Falls back to synthetic calibration when `PEMS_API_KEY` is absent.
+
+---
+
+## For Engineers
+
+AITO is structured for deployment validation workflows:
+
+1. **Benchmark**: run `python main.py --quick-run` to establish baseline metrics
+2. **Shadow mode**: run `--shadow-mode` to evaluate AI without traffic impact
+3. **Explainability**: use `DecisionExplainer` to audit AI decisions
+4. **Fault testing**: wrap your controller with `FaultTolerantController` before field deployment
+5. **Dashboard**: `streamlit run traffic_ai/dashboard/streamlit_app.py` for live monitoring
+
+---
+
+## Statistical Methodology
+
+All pairwise comparisons use:
+- **Mann-Whitney U test** (non-parametric, no normality assumption)
+- **Holm-Bonferroni correction** for family-wise error rate
+- **Bootstrap confidence intervals** (n=300)
+- Significance threshold: α = 0.05
+
+---
+
+## Citations
+
+- HCM 7th Edition (TRB, 2022) — signal timing, saturation flow rates
+- EPA MOVES2014b — CO₂ idle emission rates (0.000457 kg/s/vehicle)
+- Mannion et al. (2016), AAMAS — multi-objective RL reward weights
+- Liang et al. (2019), ITSC — throughput bonus formulation
+- Chen et al. (2001), Transport. Res. Part C — sensor fault characterization
+- Toth & Ceder (2002), Transport. Res. Part C — EWMA imputation (α=0.3)
+- Ribeiro et al. (2016), KDD — sensitivity-based feature importance

@@ -21,7 +21,7 @@ class RLPolicyController(BaseController):
 
     def reset(self, n_intersections: int) -> None:
         super().reset(n_intersections)
-        self.current_phase = {i: "NS" for i in range(n_intersections)}
+        self.current_phase = {i: "NS_THROUGH" for i in range(n_intersections)}
         self.green_elapsed = {i: 0 for i in range(n_intersections)}
 
     def compute_actions(
@@ -36,21 +36,25 @@ class RLPolicyController(BaseController):
                 self.green_elapsed[intersection_id] = elapsed
                 continue
 
-            phase_int = 0 if obs.get("current_phase", "NS") == "NS" else 1
-            hour = obs.get("hour_of_day", obs.get("step", 0.0) / 3600.0 % 24.0)
+            phase_idx = obs.get("current_phase_idx", 0.0)
             features = np.array(
                 [
                     obs.get("phase_elapsed", 0.0) / 60.0,
-                    float(phase_int == 0),  # phase_ns flag
-                    obs.get("queue_ns", 0.0) / 120.0,
-                    obs.get("queue_ew", 0.0) / 120.0,
-                    float(hour) / 24.0,  # time_of_day_normalized
+                    float(phase_idx) / 3.0,
+                    obs.get("queue_ns_through", obs.get("queue_ns", 0.0)) / 120.0,
+                    obs.get("queue_ew_through", obs.get("queue_ew", 0.0)) / 120.0,
+                    obs.get("queue_ns_left", 0.0) / 120.0,
+                    obs.get("queue_ew_left", 0.0) / 120.0,
+                    obs.get("time_of_day_normalized",
+                            (float(obs.get("step", obs.get("sim_step", 0.0))) % 86400.0) / 86400.0),
                     obs.get("upstream_queue", 0.0) / 120.0,
                 ],
                 dtype=np.float32,
             )
             action = self._policy_action(features)
-            target: SignalPhase = "NS" if int(action) == 0 else "EW"
+            from traffic_ai.simulation_engine.types import IDX_TO_PHASE
+            phase_idx_out = int(action) % 4
+            target: SignalPhase = IDX_TO_PHASE.get(phase_idx_out, "NS_THROUGH")
             if target != phase:
                 elapsed = 0
             self.current_phase[intersection_id] = target
