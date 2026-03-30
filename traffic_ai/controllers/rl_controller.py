@@ -47,7 +47,7 @@ class RLPolicyController(BaseController):
                     obs.get("queue_ew_left", 0.0) / 120.0,
                     obs.get("time_of_day_normalized",
                             (float(obs.get("step", obs.get("sim_step", 0.0))) % 86400.0) / 86400.0),
-                    0.0,  # upstream_queue always 0 — policy trained on 1-intersection (no upstream)
+                    obs.get("upstream_queue", 0.0) / 120.0,  # mean neighbour queue — trained on 4-int network
                 ],
                 dtype=np.float32,
             )

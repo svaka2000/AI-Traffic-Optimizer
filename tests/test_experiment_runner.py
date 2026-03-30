@@ -41,8 +41,14 @@ def test_runner_pretrain_only(tmp_path: Path) -> None:
     assert artifacts.trained_model_dir.exists()
 
 
-def test_rl_controller_zeros_upstream_queue() -> None:
-    """RLPolicyController always passes upstream_queue=0 to match 1-intersection training."""
+def test_rl_controller_uses_upstream_queue() -> None:
+    """RLPolicyController passes upstream_queue as feature[7], normalised by 120.
+
+    The DQN is now trained on the 4-intersection network where upstream_queue
+    is the mean of neighbouring intersection queues (non-zero).  The feature
+    vector must forward the actual value so training and evaluation are
+    on-distribution.
+    """
     import numpy as np
     from traffic_ai.controllers.rl_controller import RLPolicyController
 
@@ -62,9 +68,11 @@ def test_rl_controller_zeros_upstream_queue() -> None:
         "queue_ns_left": 3.0,
         "queue_ew_left": 2.0,
         "time_of_day_normalized": 0.5,
-        "upstream_queue": 80.0,  # non-zero — should be zeroed by controller
+        "upstream_queue": 60.0,
     }}
     ctrl.compute_actions(obs, step=10)
     assert len(captured) == 1
-    assert captured[0][7] == 0.0, "upstream_queue feature must be zeroed to match training distribution"
+    assert abs(captured[0][7] - 60.0 / 120.0) < 1e-6, (
+        "feature[7] must be upstream_queue / 120 (4-intersection training distribution)"
+    )
 

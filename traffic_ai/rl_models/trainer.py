@@ -7,8 +7,8 @@ from typing import Any
 
 import pandas as pd
 
-from traffic_ai.rl_models.dqn import DQNPolicy, train_dqn
-from traffic_ai.rl_models.environment import EnvConfig, SignalControlEnv
+from traffic_ai.rl_models.dqn import DQNPolicy, train_dqn, train_dqn_multi
+from traffic_ai.rl_models.environment import EnvConfig, MultiIntersectionSignalEnv, SignalControlEnv
 from traffic_ai.rl_models.policy_gradient import PolicyGradientPolicy, train_policy_gradient
 from traffic_ai.rl_models.q_learning import train_q_learning
 from traffic_ai.utils.io_utils import load_model, save_model, write_dataframe
@@ -76,9 +76,6 @@ def train_rl_policy_suite(
     model_dir.mkdir(parents=True, exist_ok=True)
 
     env = SignalControlEnv(EnvConfig(seed=seed))
-    # DQN full-run uses 500-step episodes to match the evaluation horizon and prevent
-    # the agent from exploiting episode boundaries to ignore EW-direction starvation.
-    dqn_env = SignalControlEnv(EnvConfig(seed=seed, step_limit=500)) if full_run else env
     policies: dict[str, Any] = {}
     rows: list[dict[str, float | str]] = []
 
@@ -96,18 +93,33 @@ def train_rl_policy_suite(
     policies["q_learning"] = q_policy
 
     # -------------------------------------------------------------------------
-    # DQN — load pre-trained 2000-episode weights when available to avoid
-    # retraining from scratch on every benchmark run.
+    # DQN — trained on the 4-intersection/2000-step network for full_run so the
+    # policy distribution matches the benchmark evaluation environment exactly.
+    # Quick/medium runs fall back to the lighter single-intersection env.
+    # Pre-trained weights are loaded from disk when available to skip retraining.
     # -------------------------------------------------------------------------
     dqn_model_path = model_dir / "dqn_policy.pt"
     dqn_policy = _try_load_dqn(dqn_model_path)
     if dqn_policy is None:
-        # full_run uses 5-seed cycling to match the 5 CV fold seeds (42–46)
-        # so the policy generalises beyond the single training demand pattern.
         n_seeds = int(full_run) * 4 + 1  # 5 for full_run, 1 otherwise
-        dqn_policy, dqn_rewards, dqn_network = train_dqn(
-            dqn_env, episodes=episodes, n_train_seeds=n_seeds
-        )
+        if full_run:
+            # 4-intersection IDQN: trains on the same 2×2 grid used in benchmarking
+            dqn_train_env: MultiIntersectionSignalEnv | SignalControlEnv = MultiIntersectionSignalEnv(
+                EnvConfig(seed=seed, step_limit=2000),
+                n_intersections=4,
+            )
+            dqn_policy, dqn_rewards, dqn_network = train_dqn_multi(
+                dqn_train_env,  # type: ignore[arg-type]
+                episodes=episodes,
+                n_train_seeds=n_seeds,
+            )
+        else:
+            dqn_train_env = SignalControlEnv(EnvConfig(seed=seed, step_limit=500))
+            dqn_policy, dqn_rewards, dqn_network = train_dqn(
+                dqn_train_env,  # type: ignore[arg-type]
+                episodes=episodes,
+                n_train_seeds=n_seeds,
+            )
         rows.extend({"algorithm": "dqn", "episode": i, "reward": r} for i, r in enumerate(dqn_rewards))
         if torch is not None and dqn_network is not None:
             torch.save(dqn_network.state_dict(), dqn_model_path)

@@ -247,3 +247,121 @@ class SignalControlEnv:
             ],
             dtype=np.float32,
         )
+
+
+class MultiIntersectionSignalEnv:
+    """N-intersection Independent DQN (IDQN) training environment.
+
+    Wraps ``TrafficNetworkSimulator`` with ``n_intersections`` nodes (default 4,
+    arranged as a 2×2 grid).  At each step every intersection receives an
+    independent action from the shared policy; all experiences are pushed to
+    a shared replay buffer so the agent learns across the whole network.
+
+    Observation space
+    -----------------
+    Same 8-float feature vector as ``SignalControlEnv`` (STATE_DIM=8), with
+    feature[7] = upstream_queue / max_queue where upstream_queue is the mean
+    total queue of the intersection's immediate neighbours.  This is non-zero
+    in a multi-intersection network and allows the agent to learn basic
+    network-coordination behaviour.
+
+    Reward
+    ------
+    Local reward per intersection:
+        r_i = -(local_queue / max_queue) - switch_penalty * phase_changed
+    """
+
+    def __init__(
+        self,
+        config: EnvConfig | None = None,
+        n_intersections: int = 4,
+    ) -> None:
+        if config is None:
+            config = EnvConfig()
+        self.config = config
+        self.n_intersections = n_intersections
+
+        engine_cfg = SimulatorConfig(
+            steps=config.step_limit,
+            intersections=n_intersections,
+            lanes_per_direction=2,
+            step_seconds=1.0,
+            max_queue_per_lane=int(config.max_queue // 2),
+            demand_profile=config.demand_profile,
+            demand_scale=1.0,
+            seed=config.seed,
+        )
+        self._engine = TrafficNetworkSimulator(engine_cfg)
+        self.step_idx: int = 0
+        self._current_phases: dict[int, int] = {i: 0 for i in range(n_intersections)}
+
+    @property
+    def observation_dim(self) -> int:
+        return 8  # STATE_DIM — identical to SignalControlEnv
+
+    @property
+    def n_actions(self) -> int:
+        return N_ACTIONS
+
+    def reset(self) -> dict[int, np.ndarray]:
+        """Reset environment; returns per-intersection encoded observations."""
+        raw = self._engine.reset_env()
+        self.step_idx = 0
+        self._current_phases = {i: 0 for i in range(self.n_intersections)}
+        return {i: self._encode_obs(raw.get(i, {}), i) for i in range(self.n_intersections)}
+
+    def step(
+        self, actions: dict[int, int]
+    ) -> tuple[dict[int, np.ndarray], dict[int, float], bool, dict]:
+        """Advance one step with per-intersection actions.
+
+        Returns
+        -------
+        (obs_dict, reward_dict, done, info)
+        """
+        self.step_idx += 1
+        w = self.config.reward_weights
+
+        engine_actions: dict[int, SignalPhase] = {}
+        switch_costs: dict[int, float] = {}
+        for i, action in actions.items():
+            new_phase = int(action) % N_PHASES
+            switch_costs[i] = w.switch_penalty if new_phase != self._current_phases[i] else 0.0
+            self._current_phases[i] = new_phase
+            engine_actions[i] = IDX_TO_PHASE[new_phase]
+
+        raw_obs, _, engine_done, _ = self._engine.step_env(engine_actions)
+        done = self.step_idx >= self.config.step_limit or engine_done
+
+        obs_dict = {i: self._encode_obs(raw_obs.get(i, {}), i) for i in range(self.n_intersections)}
+
+        max_q = max(self.config.max_queue, 1.0)
+        reward_dict: dict[int, float] = {}
+        for i in range(self.n_intersections):
+            obs_i = raw_obs.get(i, {})
+            local_queue = obs_i.get("total_queue", 0.0)
+            throughput = obs_i.get("departures", 0.0) / max(obs_i.get("arrivals", 1.0), 1.0)
+            reward_dict[i] = float(
+                -w.avg_delay * local_queue / max_q
+                - switch_costs.get(i, 0.0)
+                + w.throughput * throughput
+            )
+
+        return obs_dict, reward_dict, done, {}
+
+    def _encode_obs(self, obs: dict[str, float], iid: int) -> np.ndarray:
+        """Same 8-float encoding as SignalControlEnv; feature[7] uses actual upstream_queue."""
+        max_q = max(self.config.max_queue, 1.0)
+        return np.array(
+            [
+                obs.get("phase_elapsed", 0.0) / 60.0,
+                float(self._current_phases.get(iid, 0)) / 3.0,
+                obs.get("queue_ns_through", obs.get("queue_ns", 0.0)) / max_q,
+                obs.get("queue_ew_through", obs.get("queue_ew", 0.0)) / max_q,
+                obs.get("queue_ns_left", 0.0) / 120.0,
+                obs.get("queue_ew_left", 0.0) / 120.0,
+                obs.get("time_of_day_normalized", 0.0),
+                obs.get("upstream_queue", 0.0) / max_q,  # mean of neighbour queues
+            ],
+            dtype=np.float32,
+        )
