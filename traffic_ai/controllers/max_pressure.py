@@ -1,15 +1,22 @@
 """MaxPressure signal controller (Varaiya 2013).
 
-At each decision step MaxPressure selects the phase that maximises the sum
-of queue lengths on incoming lanes across all movements served by that phase,
-minus the sum of queue lengths on the corresponding outgoing lanes.
+At each decision step MaxPressure selects the phase that maximises the
+pressure differential across all movements served by that phase:
 
-Because outgoing-link queues are not observable in the local single-intersection
-observation space, outgoing queues are treated as zero — the standard
-single-intersection simplification used in the literature when downstream
-queue state is unavailable.  In a connected multi-intersection network the
-controller can be upgraded to subtract downstream queues if/when they are
-exposed in the observation dict.
+    pressure(phase, i) = Σ incoming_queue(i, phase)
+                       − Σ downstream_queue(neighbors, phase)
+
+where ``downstream_queue`` is the total queue at the downstream neighbor
+intersections that receive traffic from phase movements (network-aware
+formulation from Varaiya 2013, §III).
+
+When a neighbor is absent (boundary intersection) its contribution to the
+outgoing sum is treated as zero — the standard boundary condition used in
+the literature.
+
+The per-direction neighbor queues (``neighbor_N_queue``, ``neighbor_S_queue``,
+``neighbor_E_queue``, ``neighbor_W_queue``) are injected into each
+intersection's observation dict by ``TrafficNetworkSimulator._collect_observations``.
 
 Reference
 ---------
@@ -31,22 +38,52 @@ _PHASE_INCOMING: dict[str, tuple[tuple[str, ...], ...]] = {
     "EW_LEFT":    (("queue_ew_left",),),
 }
 
+# Downstream neighbor directions for each phase (Varaiya 2013, §III).
+# NS_THROUGH vehicles exit north/south → N and S neighbors absorb flow.
+# EW_THROUGH vehicles exit east/west  → E and W neighbors absorb flow.
+# NS_LEFT vehicles (from N/S) turn and exit east/west → E and W neighbors.
+# EW_LEFT vehicles (from E/W) turn and exit north/south → N and S neighbors.
+_PHASE_OUTGOING_DIRS: dict[str, tuple[str, ...]] = {
+    "NS_THROUGH": ("N", "S"),
+    "EW_THROUGH": ("E", "W"),
+    "NS_LEFT":    ("E", "W"),
+    "EW_LEFT":    ("N", "S"),
+}
+
 _PHASES: tuple[str, ...] = ("NS_THROUGH", "EW_THROUGH", "NS_LEFT", "EW_LEFT")
 
 
 def _phase_pressure(obs: dict[str, float], phase: str) -> float:
-    """Return the incoming-queue pressure for *phase* given a single-intersection observation."""
-    total = 0.0
+    """Compute Varaiya pressure for *phase* given a single-intersection observation.
+
+    pressure = Σ incoming_queue − Σ downstream_neighbor_queue
+    """
+    # Incoming: local queued vehicles served by this phase
+    incoming = 0.0
     for key_group in _PHASE_INCOMING[phase]:
         for key in key_group:
             if key in obs:
-                total += obs[key]
+                incoming += obs[key]
                 break
-    return total
+
+    # Outgoing: congestion at downstream neighbor intersections (Varaiya 2013)
+    outgoing_dirs = _PHASE_OUTGOING_DIRS[phase]
+    outgoing = sum(obs.get(f"neighbor_{d}_queue", 0.0) for d in outgoing_dirs)
+
+    return incoming - outgoing
 
 
 class MaxPressureController(BaseController):
-    """Selects the phase with the highest incoming-queue pressure at each step.
+    """Selects the phase with the highest network pressure at each step.
+
+    Uses the full Varaiya (2013) pressure formula:
+        pressure = incoming_queue − downstream_neighbor_queue
+
+    When directional neighbor queue data is available in the observation
+    dict (4-intersection network), the controller accounts for downstream
+    congestion when selecting phases.  At a single isolated intersection,
+    all neighbor queues default to 0.0 and the formula reduces to greedy
+    incoming-queue maximisation.
 
     Parameters
     ----------
@@ -78,7 +115,7 @@ class MaxPressureController(BaseController):
                 # Enforce minimum green — hold current phase.
                 target = current
             else:
-                # Select the phase with maximum incoming-queue pressure.
+                # Select the phase with maximum Varaiya pressure.
                 target = max(_PHASES, key=lambda p: _phase_pressure(obs, p))
                 if target != current:
                     elapsed = 0

@@ -425,16 +425,27 @@ class TrafficNetworkSimulator:
     # =========================================================================
 
     def _collect_observations(self, step: int) -> dict[int, dict[str, float]]:
-        """Collect per-intersection observations, including upstream queue averages."""
+        """Collect per-intersection observations, including upstream and directional neighbor queues."""
         obs: dict[int, dict[str, float]] = {}
         for intersection_id, state in self.states.items():
+            neighbor_map = self.neighbors[intersection_id]
             neighbor_queues = [
                 self.states[nid].total_queue
-                for nid in self.neighbors[intersection_id].values()
+                for nid in neighbor_map.values()
                 if nid is not None and nid in self.states
             ]
             upstream_queue = float(np.mean(neighbor_queues)) if neighbor_queues else 0.0
-            obs[intersection_id] = state.as_observation(step, upstream_queue=upstream_queue)
+            o = state.as_observation(step, upstream_queue=upstream_queue)
+            # Per-direction neighbor total queues — used by MaxPressure (Varaiya 2013)
+            # and available to any other network-aware controller.
+            for direction in ("N", "S", "E", "W"):
+                nid = neighbor_map.get(direction)
+                o[f"neighbor_{direction}_queue"] = (
+                    self.states[nid].total_queue
+                    if nid is not None and nid in self.states
+                    else 0.0
+                )
+            obs[intersection_id] = o
         return obs
 
     def _compute_step_metrics(self, step: int) -> StepMetrics:
