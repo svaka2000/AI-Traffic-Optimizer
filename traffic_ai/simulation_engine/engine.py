@@ -15,6 +15,8 @@ from traffic_ai.simulation_engine.types import (
     SignalPhase,
     SimulationResult,
     StepMetrics,
+    _PHASE_LEFT_DIRS,
+    _PHASE_THROUGH_DIRS,
 )
 
 
@@ -45,6 +47,9 @@ class SimulatorConfig:
     saturation_flow_rate: float = 1800.0  # veh/hr/lane — HCM 7th ed. default for LT+TH+RT
     # HCM-aligned turning movement factor (fraction of departures forwarded downstream)
     turning_movement_factor: float = 0.60  # replaces hardcoded 0.65; HCM-aligned default
+    # 4-phase model parameters (AITO Phase 3)
+    left_turn_arrival_fraction: float = 0.15   # left-turn share of through arrivals (HCM typical)
+    left_turn_saturation_flow: float = 1200.0  # veh/hr/lane, HCM 7th ed. for protected left turns
 
 
 class TrafficNetworkSimulator:
@@ -196,12 +201,16 @@ class TrafficNetworkSimulator:
     def _override_emergency_actions(
         self, actions: dict[int, SignalPhase]
     ) -> dict[int, SignalPhase]:
-        """Force green for emergency vehicle direction, decrement counter."""
+        """Force green for emergency vehicle direction, decrement counter.
+
+        Uses NS_THROUGH / EW_THROUGH to ensure through-lane clearance for
+        emergency vehicles (not a left-turn phase).
+        """
         overridden = dict(actions)
         for iid, state in self.states.items():
             if state.emergency_active and state.emergency_steps_remaining > 0:
                 ev_dir = state.emergency_direction
-                required_phase: SignalPhase = "NS" if ev_dir in ("N", "S") else "EW"
+                required_phase: SignalPhase = "NS_THROUGH" if ev_dir in ("N", "S") else "EW_THROUGH"
                 overridden[iid] = required_phase
                 state.emergency_steps_remaining -= 1
                 if state.emergency_steps_remaining <= 0:
@@ -218,14 +227,14 @@ class TrafficNetworkSimulator:
         self._apply_pending_inflow()
         self._update_signal_phases(actions)
         self._generate_stochastic_arrivals(step)
-        self._service_and_propagate()
+        self._service_and_propagate(step=step)
 
     # =========================================================================
     # SRP sub-steps
     # =========================================================================
 
     def _apply_pending_inflow(self) -> None:
-        """Moves vehicles queued from the previous tick into a randomly chosen receiving lane."""
+        """Moves vehicles queued from the previous tick into receiving lanes."""
         for state in self.states.values():
             for direction, incoming in state.pending_inflow.items():
                 lane_index = int(self.rng.integers(0, self.config.lanes_per_direction))
@@ -234,6 +243,14 @@ class TrafficNetworkSimulator:
                     state.queue_matrix[direction][lane_index] + incoming,
                 )
             state.pending_inflow = {}
+            # Left-turn pending inflow (capped at max_queue_per_lane for safety)
+            for direction, incoming in state.left_pending_inflow.items():
+                if direction in state.left_queue_matrix:
+                    state.left_queue_matrix[direction][0] = min(
+                        state.max_queue_per_lane,
+                        state.left_queue_matrix[direction][0] + incoming,
+                    )
+            state.left_pending_inflow = {}
 
     def _update_signal_phases(self, actions: dict[int, SignalPhase]) -> None:
         """Commits phase decisions with HCM 7th edition minimum green enforcement.
@@ -283,7 +300,7 @@ class TrafficNetworkSimulator:
             for direction in ["N", "S", "E", "W"]:
                 self._sample_arrivals_for_direction(state, direction, step)
 
-    def _service_and_propagate(self) -> None:
+    def _service_and_propagate(self, step: int = 0) -> None:
         """Clears green-phase queues; forwards turning_movement_factor of departures downstream.
 
         The propagation fraction defaults to 0.60 (HCM-aligned; replaces the
@@ -291,7 +308,7 @@ class TrafficNetworkSimulator:
         """
         flow_to_neighbors: dict[tuple[int, Direction], float] = defaultdict(float)
         for intersection_id, state in self.states.items():
-            departures_by_direction = self._service_intersection(state)
+            departures_by_direction = self._service_intersection(state, step=step)
             for direction, departed in departures_by_direction.items():
                 neighbor_id = self.neighbors[intersection_id].get(direction)
                 if neighbor_id is None:
@@ -320,15 +337,27 @@ class TrafficNetworkSimulator:
             )
             state.total_arrivals += int(arrivals)
 
-    def _service_intersection(self, state: IntersectionState) -> dict[Direction, float]:
+        # 4-phase model: generate left-turn arrivals (HCM typical 15% of through rate)
+        left_rate = rate * self.config.left_turn_arrival_fraction
+        if left_rate > 0 and direction in state.left_queue_matrix:
+            left_arrivals = float(self.rng.poisson(left_rate * self.config.step_seconds))
+            state.left_queue_matrix[direction][0] = min(
+                state.max_queue_per_lane,
+                state.left_queue_matrix[direction][0] + left_arrivals,
+            )
+            state.total_arrivals += int(left_arrivals)
+
+    def _service_intersection(self, state: IntersectionState, step: int = 0) -> dict[Direction, float]:
         """Service vehicles at the intersection for one simulation step.
 
-        During yellow + all-red clearance (``transition_steps_remaining > 0``)
-        no vehicles depart — this models the all-red clearance interval per
-        HCM 7th edition.
+        4-phase model (AITO Phase 3):
+        - NS / NS_THROUGH: serve through queues for N, S
+        - EW / EW_THROUGH: serve through queues for E, W
+        - NS_LEFT: serve left_queue_matrix for N, S at 1200 veh/hr/lane (HCM)
+        - EW_LEFT: serve left_queue_matrix for E, W at 1200 veh/hr/lane (HCM)
 
-        Saturation flow rate: 1800 veh/hr/lane (HCM 7th ed. default for shared
-        through/turn movements) = 0.5 veh/s/lane.
+        During yellow + all-red clearance (transition_steps_remaining > 0)
+        no vehicles depart — HCM 7th edition all-red clearance semantics.
         """
         departures: dict[Direction, float] = {d: 0.0 for d in ["N", "S", "E", "W"]}
 
@@ -338,29 +367,52 @@ class TrafficNetworkSimulator:
             state.cumulative_stopped_vehicles += state.total_queue
             return departures
 
-        green_directions = ["N", "S"] if state.current_phase == "NS" else ["E", "W"]
-        # HCM 7th ed. saturation flow rate: 1800 veh/hr/lane = 0.5 veh/s/lane
-        saturation_rate_per_lane = self.config.saturation_flow_rate / 3600.0
+        phase = state.current_phase
+        through_dirs = _PHASE_THROUGH_DIRS.get(phase, ["N", "S"])
+        left_dirs = _PHASE_LEFT_DIRS.get(phase, [])
+        is_left_phase = len(left_dirs) > 0
+
+        # HCM 7th ed.: 1800 veh/hr/lane for through, 1200 for protected left turns
+        through_sat = self.config.saturation_flow_rate / 3600.0       # veh/s/lane
+        left_sat = self.config.left_turn_saturation_flow / 3600.0     # veh/s/lane
         non_compliance = self.demand.noncompliance_rate()
 
+        # Service through lanes
         for direction in ["N", "S", "E", "W"]:
             svc_multiplier = self.demand.service_rate_multiplier(direction)
             for lane in range(self.config.lanes_per_direction):
                 queue = state.queue_matrix[direction][lane]
-                if direction in green_directions:
+                if direction in through_dirs:
                     capacity = float(
-                        self.rng.poisson(saturation_rate_per_lane * svc_multiplier * self.config.step_seconds)
+                        self.rng.poisson(through_sat * svc_multiplier * self.config.step_seconds)
                     )
                     moved = min(queue, capacity)
-                elif non_compliance > 0.0:
-                    # High-density profile: some vehicles run red lights
-                    red_rate = saturation_rate_per_lane * non_compliance * 0.2 * svc_multiplier
+                elif non_compliance > 0.0 and not is_left_phase:
+                    red_rate = through_sat * non_compliance * 0.2 * svc_multiplier
                     capacity = float(self.rng.poisson(red_rate * self.config.step_seconds))
                     moved = min(queue, capacity)
                 else:
                     moved = 0.0
                 state.queue_matrix[direction][lane] -= moved
                 departures[direction] += moved
+
+        # Service left-turn lanes (NS_LEFT or EW_LEFT phases only)
+        if is_left_phase and state.left_queue_matrix:
+            for direction in left_dirs:
+                if direction not in state.left_queue_matrix:
+                    continue
+                svc_multiplier = self.demand.service_rate_multiplier(direction)
+                capacity = float(
+                    self.rng.poisson(left_sat * svc_multiplier * self.config.step_seconds)
+                )
+                moved = min(state.left_queue_matrix[direction][0], capacity)
+                state.left_queue_matrix[direction][0] -= moved
+                departures[direction] += moved
+            # Track left-phase service time to detect starvation
+            if "N" in left_dirs or "S" in left_dirs:
+                state.left_ns_last_served = step
+            else:
+                state.left_ew_last_served = step
 
         total_queue = state.total_queue
         state.cumulative_wait_sec += total_queue * self.config.step_seconds
@@ -490,12 +542,21 @@ class TrafficNetworkSimulator:
                 "E": np.zeros(self.config.lanes_per_direction, dtype=np.float64),
                 "W": np.zeros(self.config.lanes_per_direction, dtype=np.float64),
             }
+            # 4-phase model: one dedicated left-turn lane per direction
+            left_queue_matrix = {
+                "N": np.zeros(1, dtype=np.float64),
+                "S": np.zeros(1, dtype=np.float64),
+                "E": np.zeros(1, dtype=np.float64),
+                "W": np.zeros(1, dtype=np.float64),
+            }
             states[intersection_id] = IntersectionState(
                 intersection_id=intersection_id,
                 lanes_per_direction=self.config.lanes_per_direction,
                 max_queue_per_lane=self.config.max_queue_per_lane,
                 queue_matrix=queue_matrix,
+                left_queue_matrix=left_queue_matrix,
                 pending_inflow={},
+                left_pending_inflow={},
             )
         return states
 

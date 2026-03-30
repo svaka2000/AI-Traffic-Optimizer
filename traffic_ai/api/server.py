@@ -47,7 +47,7 @@ class SimulateRequest(BaseModel):
 # ---------------------------------------------------------------------------
 _RUN_REGISTRY: dict[str, dict[str, Any]] = {}
 
-app = FastAPI(title="Traffic AI Optimization API", version="2.0.0")
+app = FastAPI(title="AITO API", version="2.0.0", description="AITO — AI Traffic Optimization")
 
 
 # ---------------------------------------------------------------------------

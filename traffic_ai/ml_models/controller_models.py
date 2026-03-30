@@ -15,7 +15,6 @@ from typing import Any
 
 import numpy as np
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
 from sklearn.neural_network import MLPClassifier
 
 logger = logging.getLogger(__name__)
@@ -119,6 +118,7 @@ def train_supervised_controller_models(seed: int = 42, quick_run: bool = False) 
     data = generate_controller_training_data(seed=seed, n_steps=n_steps)
     X, y = data.X, data.y
 
+    # BENCHMARK controllers: trained on imitation labels from AdaptiveRuleController
     models: dict[str, Any] = {
         "random_forest": RandomForestClassifier(
             n_estimators=90, max_depth=10, random_state=seed
@@ -132,7 +132,6 @@ def train_supervised_controller_models(seed: int = 42, quick_run: bool = False) 
             random_state=seed,
             early_stopping=True,
         ),
-        "timeseries": LogisticRegression(max_iter=1200),
     }
     if XGBClassifier is not None:
         models["xgboost"] = XGBClassifier(
