@@ -30,40 +30,53 @@ from traffic_ai.simulation_engine.types import SignalPhase
 
 logger = logging.getLogger(__name__)
 
-# Expanded action space (Problem 4):
-# action = phase_idx * N_DURATIONS + duration_idx
-# phase_idx   ∈ {0=NS, 1=EW}
-# duration_idx ∈ index into GREEN_DURATIONS
+# 4-phase action space (AITO Phase 3):
+# action ∈ {0=NS_THROUGH, 1=EW_THROUGH, 2=NS_LEFT, 3=EW_LEFT}
+N_PHASES: int = 4
+N_ACTIONS: int = 4
+STATE_DIM: int = 8  # 8-feature observation (4-phase model)
+
+# Phase index → SignalPhase string (canonical 4-phase mapping)
+_PHASE_IDX_TO_STR: dict[int, str] = {
+    0: "NS_THROUGH",
+    1: "EW_THROUGH",
+    2: "NS_LEFT",
+    3: "EW_LEFT",
+}
+
+# Keep GREEN_DURATIONS for backward compat (referenced in environment.py)
 GREEN_DURATIONS: list[int] = [15, 20, 25, 30, 35, 40, 45, 60]
-N_DURATIONS: int = len(GREEN_DURATIONS)   # 8
-N_PHASES: int = 2
-N_ACTIONS: int = N_PHASES * N_DURATIONS   # 16
-STATE_DIM: int = 6
+N_DURATIONS: int = 1  # duration selection removed; phase-only action space
 
 
 def _action_to_phase(action: int) -> int:
-    """Extract phase index (0 or 1) from a 16-action integer."""
-    return int(action) // N_DURATIONS
+    """Extract phase index (0-3) from action integer."""
+    return int(action) % N_PHASES
 
 
 def _obs_to_vec(obs: dict[str, float]) -> np.ndarray:
-    """6-feature observation vector for RL controllers.
+    """8-feature observation vector for RL controllers (4-phase model).
 
-    Features (Problem 4 expanded observation space)
-    ------------------------------------------------
+    Features
+    --------
     0  phase_elapsed_norm   : phase_elapsed / 60
-    1  phase_ns             : 1.0 if current phase is NS, else 0.0
-    2  queue_ns_norm        : queue_ns / 120
-    3  queue_ew_norm        : queue_ew / 120
-    4  time_of_day_norm     : time_of_day in [0, 1]
-    5  upstream_queue_norm  : avg upstream queue / 120
+    1  current_phase_norm   : current_phase_idx / 3  (0-3 normalized)
+    2  queue_ns_through_norm: queue_ns_through / 120
+    3  queue_ew_through_norm: queue_ew_through / 120
+    4  queue_ns_left_norm   : queue_ns_left / 120
+    5  queue_ew_left_norm   : queue_ew_left / 120
+    6  time_of_day_norm     : time_of_day in [0, 1]
+    7  upstream_queue_norm  : avg upstream queue / 120
     """
+    phase_idx = obs.get("current_phase_idx", obs.get("phase_ns", 0.0))
     return np.array(
         [
             obs.get("phase_elapsed", 0.0) / 60.0,
-            obs.get("phase_ns", float(obs.get("current_phase", 0.0)) == 0.0),
-            obs.get("queue_ns", 0.0) / 120.0,
-            obs.get("queue_ew", 0.0) / 120.0,
+            float(phase_idx) / 3.0,
+            obs.get("queue_ns_through", obs.get("queue_ns", 0.0)) / 120.0,
+            obs.get("queue_ew_through", obs.get("queue_ew", 0.0)) / 120.0,
+            obs.get("queue_ns_left", 0.0) / 120.0,
+            obs.get("queue_ew_left", 0.0) / 120.0,
             obs.get("time_of_day_normalized",
                     (float(obs.get("step", obs.get("sim_step", 0.0))) % 86400.0) / 86400.0),
             obs.get("upstream_queue", 0.0) / 120.0,
@@ -105,10 +118,10 @@ class QLearningController(BaseController):
         self.epsilon_min = epsilon_min
         self.epsilon_decay = epsilon_decay
         self._rng = np.random.default_rng(seed)
-        # Q table: (q_ns_bucket, q_ew_bucket, current_phase, action)
-        # action ∈ [0, N_ACTIONS) = 16 (phase × duration)
+        # Q table: (q_ns_bucket, q_ew_bucket, current_phase_bucket, action)
+        # current_phase_bucket ∈ [0, 4); action ∈ [0, N_ACTIONS=4)
         self._q: np.ndarray = np.zeros(
-            (self.QUEUE_BUCKETS, self.QUEUE_BUCKETS, 2, N_ACTIONS), dtype=np.float64
+            (self.QUEUE_BUCKETS, self.QUEUE_BUCKETS, N_PHASES, N_ACTIONS), dtype=np.float64
         )
         self._prev_state: dict[int, tuple[int, int, int]] | None = None
         self._prev_action: dict[int, int] | None = None
@@ -126,14 +139,14 @@ class QLearningController(BaseController):
         actions: dict[int, SignalPhase] = {}
         for iid, obs in observations.items():
             full_action = self._act(iid, obs)
-            # Extract phase from joint (phase, duration) action
             phase_idx = _action_to_phase(full_action)
-            actions[iid] = "NS" if phase_idx == 0 else "EW"
+            phase_str: SignalPhase = _PHASE_IDX_TO_STR[phase_idx]  # type: ignore[assignment]
+            actions[iid] = phase_str
             self._current_phase[iid] = phase_idx
         return actions
 
     def select_action(self, obs: dict[str, float]) -> int:
-        """Return phase index (0=NS, 1=EW) — satisfies BaseController interface."""
+        """Return phase index (0-3) — satisfies BaseController interface."""
         full_action = self._act(0, obs)
         return _action_to_phase(full_action)
 
@@ -165,10 +178,11 @@ class QLearningController(BaseController):
         def bucket(val: float) -> int:
             idx = int(val / self.QUEUE_MAX * self.QUEUE_BUCKETS)
             return min(idx, self.QUEUE_BUCKETS - 1)
+        phase_idx = int(obs.get("current_phase_idx", obs.get("current_phase", 0.0))) % N_PHASES
         return (
             bucket(obs.get("queue_ns", 0.0)),
             bucket(obs.get("queue_ew", 0.0)),
-            int(obs.get("current_phase", 0.0)) % 2,
+            phase_idx,
         )
 
     def save(self, path: Path) -> None:
@@ -297,12 +311,13 @@ class DQNController(BaseController):
         for iid, obs in observations.items():
             full_action = self._act(_obs_to_vec(obs))
             phase_idx = _action_to_phase(full_action)
-            actions[iid] = "NS" if phase_idx == 0 else "EW"
+            phase_str: SignalPhase = _PHASE_IDX_TO_STR[phase_idx]  # type: ignore[assignment]
+            actions[iid] = phase_str
             self._current_phase[iid] = phase_idx
         return actions
 
     def select_action(self, obs: dict[str, float]) -> int:
-        """Return phase index (0=NS, 1=EW) — satisfies BaseController interface."""
+        """Return phase index (0-3) — satisfies BaseController interface."""
         full_action = self._act(_obs_to_vec(obs))
         return _action_to_phase(full_action)
 
@@ -490,12 +505,13 @@ class PPOController(BaseController):
             vec = _obs_to_vec(obs)
             full_action, _ = self._sample_action(vec)
             phase_idx = _action_to_phase(full_action)
-            actions[iid] = "NS" if phase_idx == 0 else "EW"
+            phase_str: SignalPhase = _PHASE_IDX_TO_STR[phase_idx]  # type: ignore[assignment]
+            actions[iid] = phase_str
             self._current_phase[iid] = phase_idx
         return actions
 
     def select_action(self, obs: dict[str, float]) -> int:
-        """Return phase index (0=NS, 1=EW) — satisfies BaseController interface."""
+        """Return phase index (0-3) — satisfies BaseController interface."""
         vec = _obs_to_vec(obs)
         self._last_obs = vec
         full_action, log_prob = self._sample_action(vec)
@@ -664,12 +680,12 @@ class A2CController(BaseController):
         for iid, obs in observations.items():
             full_action = self._sample_action(_obs_to_vec(obs))
             phase_idx = _action_to_phase(full_action)
-            actions[iid] = "NS" if phase_idx == 0 else "EW"
+            actions[iid] = _PHASE_IDX_TO_STR[phase_idx]
             self._current_phase[iid] = phase_idx
         return actions
 
     def select_action(self, obs: dict[str, float]) -> int:
-        """Return phase index (0=NS, 1=EW) — satisfies BaseController interface."""
+        """Return phase index (0-3) — satisfies BaseController interface."""
         return _action_to_phase(self._sample_action(_obs_to_vec(obs)))
 
     def update(
@@ -851,12 +867,12 @@ class SACController(BaseController):
         for iid, obs in observations.items():
             full_action = self._sample_action(_obs_to_vec(obs))
             phase_idx = _action_to_phase(full_action)
-            actions[iid] = "NS" if phase_idx == 0 else "EW"
+            actions[iid] = _PHASE_IDX_TO_STR[phase_idx]
             self._current_phase[iid] = phase_idx
         return actions
 
     def select_action(self, obs: dict[str, float]) -> int:
-        """Return phase index (0=NS, 1=EW) — satisfies BaseController interface."""
+        """Return phase index (0-3) — satisfies BaseController interface."""
         return _action_to_phase(self._sample_action(_obs_to_vec(obs)))
 
     def update(
@@ -1067,12 +1083,12 @@ class RecurrentPPOController(BaseController):
         for iid, obs in observations.items():
             full_action, _ = self._act_recurrent(iid, _obs_to_vec(obs))
             phase_idx = _action_to_phase(full_action)
-            actions[iid] = "NS" if phase_idx == 0 else "EW"
+            actions[iid] = _PHASE_IDX_TO_STR[phase_idx]
             self._current_phase[iid] = phase_idx
         return actions
 
     def select_action(self, obs: dict[str, float]) -> int:
-        """Return phase index (0=NS, 1=EW) — satisfies BaseController interface."""
+        """Return phase index (0-3) — satisfies BaseController interface."""
         full_action, _ = self._act_recurrent(0, _obs_to_vec(obs))
         return _action_to_phase(full_action)
 

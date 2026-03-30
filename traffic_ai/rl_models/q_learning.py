@@ -9,7 +9,7 @@ import numpy as np
 from traffic_ai.rl_models.environment import SignalControlEnv
 
 
-N_ACTIONS_ENV: int = 16  # matches SignalControlEnv.n_actions
+N_ACTIONS_ENV: int = 4  # matches SignalControlEnv.n_actions (4-phase model)
 
 
 @dataclass(slots=True)
@@ -18,14 +18,12 @@ class QLearningPolicy:
     n_actions: int = N_ACTIONS_ENV
 
     def act(self, features: np.ndarray) -> int:
-        """Return phase index (0=NS, 1=EW) from the Q-table."""
+        """Return phase index (0-3) from the Q-table."""
         key = discretize_state(features)
         values = self.q_table.get(key)
         if values is None:
             return int(features[2] < features[3])  # queue_ns_norm < queue_ew_norm → EW
-        full_action = int(np.argmax(values))
-        # Extract phase from joint (phase, duration) action
-        return full_action // 8
+        return int(np.argmax(values))
 
 
 def discretize_state(state: np.ndarray) -> tuple[int, int, int]:

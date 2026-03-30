@@ -25,7 +25,7 @@ except Exception:  # pragma: no cover
 if TORCH_AVAILABLE:
 
     class DQNetwork(nn.Module):
-        def __init__(self, input_dim: int = 6, output_dim: int = 16) -> None:
+        def __init__(self, input_dim: int = 8, output_dim: int = 4) -> None:
             super().__init__()
             self.net = nn.Sequential(
                 nn.Linear(input_dim, 64),
@@ -45,12 +45,10 @@ class DQNPolicy:
 
     def act(self, features: np.ndarray) -> int:
         if TORCH_AVAILABLE and self.network is not None:
-            obs = torch.tensor(features[:6], dtype=torch.float32).unsqueeze(0)
+            obs = torch.tensor(features, dtype=torch.float32).unsqueeze(0)
             with torch.no_grad():
                 q = self.network(obs)
-            full_action = int(torch.argmax(q, dim=-1).item())
-            # Return phase index (0=NS, 1=EW) from the 16-action encoding
-            return full_action // 8
+            return int(torch.argmax(q, dim=-1).item())
         return int(features[2] < features[3])  # queue_ns_norm < queue_ew_norm → EW
 
 

@@ -24,7 +24,7 @@ except Exception:  # pragma: no cover
 if TORCH_AVAILABLE:
 
     class PolicyNet(nn.Module):
-        def __init__(self, input_dim: int = 6, output_dim: int = 16) -> None:
+        def __init__(self, input_dim: int = 8, output_dim: int = 4) -> None:
             super().__init__()
             self.model = nn.Sequential(
                 nn.Linear(input_dim, 64),
@@ -46,9 +46,8 @@ class PolicyGradientPolicy:
     def act(self, features: np.ndarray) -> int:
         if TORCH_AVAILABLE and self.network is not None:
             with torch.no_grad():
-                probs = self.network(torch.tensor(features[:6], dtype=torch.float32).unsqueeze(0))
-            full_action = int(torch.argmax(probs, dim=-1).item())
-            return full_action // 8  # extract phase (0 or 1)
+                probs = self.network(torch.tensor(features, dtype=torch.float32).unsqueeze(0))
+            return int(torch.argmax(probs, dim=-1).item())
         return int(features[2] < features[3])  # queue_ns_norm < queue_ew_norm → EW
 
 

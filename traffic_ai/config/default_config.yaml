@@ -100,6 +100,17 @@ controllers:
     - dqn
     - ppo
 
+rl:
+  # Multi-objective reward weights (AITO Phase 4).
+  # Sources: Mannion et al. (2016) AAMAS workshop; Liang et al. (2019) ITSC.
+  reward_weights:
+    avg_delay: 0.12        # primary queue minimisation target
+    ped_wait: 0.05         # NS/EW fairness (pedestrian/minor-road proxy)
+    emissions_co2: 0.03    # EPA MOVES2014b stopped-vehicle proxy
+    switch_penalty: 2.0    # flat penalty per phase change (seconds lost — HCM yellow+all-red)
+    throughput: 0.08       # departure rate bonus
+    left_starve: 0.04      # left-turn starvation penalty (>60 s without service)
+
 experiments:
   quick_run:
     enabled: true

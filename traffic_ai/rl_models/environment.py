@@ -3,76 +3,93 @@
 Single-intersection MDP for RL pretraining, built on the canonical
 TrafficNetworkSimulator.
 
-Expanded action space (Problem 4)
-----------------------------------
-Action is now a joint (phase, green_duration) pair encoded as a single
-integer in [0, 15]:
+4-Phase Action Space (AITO Phase 3)
+-------------------------------------
+Action ∈ {0, 1, 2, 3}:
+    0 = NS_THROUGH  (northbound + southbound through traffic)
+    1 = EW_THROUGH  (eastbound + westbound through traffic)
+    2 = NS_LEFT     (protected NS left turns — HCM 7th ed.)
+    3 = EW_LEFT     (protected EW left turns — HCM 7th ed.)
 
-    action = phase_idx * 8 + duration_idx
+Observation space (8 floats, STATE_DIM=8)
+------------------------------------------
+    [phase_elapsed_norm, current_phase_idx_norm,
+     queue_ns_through_norm, queue_ew_through_norm,
+     queue_ns_left_norm, queue_ew_left_norm,
+     time_of_day_norm, upstream_queue_norm]
 
-where:
-    phase_idx      : 0 = NS green,  1 = EW green
-    duration_idx   : index into GREEN_DURATIONS = [15, 20, 25, 30, 35, 40, 45, 60]
+Multi-Objective Reward (AITO Phase 4)
+---------------------------------------
+Six components with configurable weights (default_config.yaml: rl.reward_weights):
 
-This gives 2 × 8 = 16 discrete actions.
+    reward = w1 * (-avg_delay_component)
+           + w2 * (-pedestrian_wait_component)
+           + w3 * (-emissions_co2_component)
+           + w4 * (-switch_penalty_component)
+           + w5 * (+throughput_component)
+           + w6 * (-left_starvation_component)
 
-When ``select_action`` / ``compute_actions`` are called by controllers
-*outside* of training, only the phase component (action // 8) is returned
-so that the BaseController interface contract (returning 0 or 1) is preserved.
-
-Observation space (6 floats)
------------------------------
-    [phase_elapsed_norm, cycle_length_norm, queue_ns_norm, queue_ew_norm,
-     time_of_day_normalized, upstream_queue_norm]
-
-Reward
-------
-    reward = -0.12 * total_queue
-             - 0.05 * |queue_ns - queue_ew|
-             - switch_cost
-             - 0.02 * cycle_length          # cycle_length_penalty (Problem 4)
-
-where switch_cost = 2.0 if phase changed, else 0.
+Default weights sourced from:
+    Mannion et al. (2016) "An Experimental Review of Reinforcement Learning
+    Algorithms for Adaptive Traffic Signal Control" — AAMAS workshop.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
 from traffic_ai.simulation_engine.engine import SimulatorConfig, TrafficNetworkSimulator
-from traffic_ai.simulation_engine.types import SignalPhase
+from traffic_ai.simulation_engine.types import IDX_TO_PHASE, SignalPhase
 
 
-# Green duration choices (seconds) — must stay in sync with RL controllers
-GREEN_DURATIONS: list[int] = [15, 20, 25, 30, 35, 40, 45, 60]
-N_PHASES = 2
-N_DURATIONS = len(GREEN_DURATIONS)
-N_ACTIONS = N_PHASES * N_DURATIONS  # 16
+# 4-phase model constants — in sync with rl_controllers.py
+N_PHASES = 4
+N_DURATIONS = 1     # duration selection removed; phase-only action space
+N_ACTIONS = N_PHASES  # 4
+
+
+@dataclass(slots=True)
+class RewardWeights:
+    """Configurable weights for the 6-component multi-objective reward.
+
+    Sources
+    -------
+    - avg_delay     : primary minimisation target (Mannion et al., 2016)
+    - ped_wait      : fairness proxy (pedestrian/minor-road wait time)
+    - emissions_co2 : EPA MOVES2014b proxy — total_queue × stop_factor
+    - switch_penalty: phase-change cost (HCM 7th ed. — yellow + all-red = 4 s)
+    - throughput    : throughput reward (Liang et al., 2019, ITSC)
+    - left_starve   : left-turn starvation penalty (Mannion et al., 2016)
+    """
+    avg_delay: float = 0.12       # weight on negative normalized queue
+    ped_wait: float = 0.05        # weight on queue imbalance (fairness)
+    emissions_co2: float = 0.03   # weight on CO2 proxy
+    switch_penalty: float = 2.0   # flat penalty per phase change (seconds lost)
+    throughput: float = 0.08      # weight on normalized throughput
+    left_starve: float = 0.04     # weight on left-turn starvation penalty
 
 
 @dataclass(slots=True)
 class EnvConfig:
     max_queue: float = 120.0
-    switch_penalty: float = 2.0
-    cycle_length_penalty: float = 0.02   # penalty weight for long green phases (Problem 4)
     step_limit: int = 220
     seed: int = 42
     demand_profile: str = "rush_hour"
+    reward_weights: RewardWeights = field(default_factory=RewardWeights)
 
 
 class SignalControlEnv:
     """Single-intersection MDP wrapping the canonical simulation engine.
 
-    The environment uses ``TrafficNetworkSimulator`` with one intersection
-    so that all physics (HCM signal timing, EPA emissions, demand profiles)
-    are identical to the benchmarking engine used by the experiment runner.
+    Uses ``TrafficNetworkSimulator`` with one intersection so all physics
+    (HCM signal timing, EPA emissions, demand profiles) are identical to
+    the benchmarking engine used by the experiment runner.
 
     Action encoding
     ---------------
-    ``action`` ∈ [0, N_ACTIONS) = phase_idx * N_DURATIONS + duration_idx
-    ``phase_idx``   = action // N_DURATIONS   → 0 (NS) or 1 (EW)
-    ``duration_idx`` = action %  N_DURATIONS  → index into GREEN_DURATIONS
+    ``action`` ∈ [0, N_ACTIONS):
+        0 → NS_THROUGH, 1 → EW_THROUGH, 2 → NS_LEFT, 3 → EW_LEFT
     """
 
     def __init__(self, config: EnvConfig | None = None) -> None:
@@ -85,21 +102,21 @@ class SignalControlEnv:
             intersections=1,
             lanes_per_direction=2,
             step_seconds=1.0,
-            max_queue_per_lane=int(config.max_queue // 2),  # per lane
+            max_queue_per_lane=int(config.max_queue // 2),
             demand_profile=config.demand_profile,
             demand_scale=1.0,
             seed=config.seed,
         )
         self._engine = TrafficNetworkSimulator(engine_cfg)
         self.step_idx: int = 0
-        self._current_phase: int = 0       # 0=NS, 1=EW
-        self._current_duration: int = GREEN_DURATIONS[3]  # 30 s default
-        self._phase_hold_remaining: int = 0
+        self._current_phase: int = 0   # 0-3
         self._last_obs: dict[str, float] = {}
+        self._step_since_ns_left: int = 0
+        self._step_since_ew_left: int = 0
 
     @property
     def observation_dim(self) -> int:
-        return 6
+        return 8  # STATE_DIM
 
     @property
     def n_actions(self) -> int:
@@ -110,9 +127,9 @@ class SignalControlEnv:
         self.step_idx = 0
         obs0 = raw.get(0, {})
         self._current_phase = 0
-        self._current_duration = GREEN_DURATIONS[3]
-        self._phase_hold_remaining = 0
         self._last_obs = obs0
+        self._step_since_ns_left = 0
+        self._step_since_ew_left = 0
         return self._encode_obs(obs0)
 
     def step(
@@ -123,26 +140,29 @@ class SignalControlEnv:
         Parameters
         ----------
         action:
-            Integer in [0, N_ACTIONS).  Encodes both the desired phase and the
-            green duration to hold that phase.
+            Integer in [0, N_ACTIONS) mapping to a 4-phase signal.
         """
         self.step_idx += 1
+        w = self.config.reward_weights
 
-        # Decode action
-        phase_idx = int(action) // N_DURATIONS
-        duration_idx = int(action) % N_DURATIONS
-        new_phase: int = phase_idx
-        new_duration: int = GREEN_DURATIONS[duration_idx]
+        new_phase = int(action) % N_PHASES
+        phase_str: SignalPhase = IDX_TO_PHASE[new_phase]
 
-        # Switch cost
-        switch_cost = 0.0
-        if new_phase != self._current_phase:
-            switch_cost = self.config.switch_penalty
+        # Track left-turn starvation counters
+        if new_phase == 2:
+            self._step_since_ns_left = 0
+        else:
+            self._step_since_ns_left += 1
+        if new_phase == 3:
+            self._step_since_ew_left = 0
+        else:
+            self._step_since_ew_left += 1
+
+        # Phase-change switch cost
+        switch_cost = w.switch_penalty if new_phase != self._current_phase else 0.0
         self._current_phase = new_phase
-        self._current_duration = new_duration
 
         # Apply to engine
-        phase_str: SignalPhase = "NS" if new_phase == 0 else "EW"
         engine_actions = {0: phase_str}
         raw_obs, _, engine_done, _ = self._engine.step_env(engine_actions)
 
@@ -151,47 +171,79 @@ class SignalControlEnv:
 
         queue_ns = obs.get("queue_ns", 0.0)
         queue_ew = obs.get("queue_ew", 0.0)
-        total_queue = queue_ns + queue_ew
+        queue_ns_left = obs.get("queue_ns_left", 0.0)
+        queue_ew_left = obs.get("queue_ew_left", 0.0)
+        total_queue = queue_ns + queue_ew + queue_ns_left + queue_ew_left
+        max_q = max(self.config.max_queue, 1.0)
 
-        # Reward: queue minimisation + fairness + switch cost + cycle length penalty
+        # Component 1: avg_delay — normalized queue
+        avg_delay = total_queue / max_q
+
+        # Component 2: pedestrian_wait — queue imbalance between NS and EW axes
+        ped_wait = abs(queue_ns - queue_ew) / max_q
+
+        # Component 3: emissions_co2 — stopped-vehicle proxy (EPA MOVES2014b:
+        #   idling produces ~431 g CO2/hr per vehicle; normalized to [0,1] here)
+        emissions_co2 = total_queue / max_q  # same proxy as avg_delay (simplified)
+
+        # Component 4: throughput — departures as a positive signal
+        throughput = obs.get("departures", 0.0) / max(obs.get("arrivals", 1.0), 1.0)
+
+        # Component 5: left_starvation — penalise long waits without left service
+        STARVATION_THRESHOLD = 60  # steps (~60 s) before penalty kicks in
+        left_starve = 0.0
+        if self._step_since_ns_left > STARVATION_THRESHOLD and queue_ns_left > 0:
+            left_starve += (self._step_since_ns_left - STARVATION_THRESHOLD) / 60.0
+        if self._step_since_ew_left > STARVATION_THRESHOLD and queue_ew_left > 0:
+            left_starve += (self._step_since_ew_left - STARVATION_THRESHOLD) / 60.0
+
         reward = (
-            -0.12 * total_queue
-            - 0.05 * abs(queue_ns - queue_ew)
+            -w.avg_delay * avg_delay
+            - w.ped_wait * ped_wait
+            - w.emissions_co2 * emissions_co2
             - switch_cost
-            - self.config.cycle_length_penalty * float(new_duration)  # cycle_length_penalty
+            + w.throughput * throughput
+            - w.left_starve * left_starve
         )
 
         done = self.step_idx >= self.config.step_limit or engine_done
         info = {
             "queue_ns": queue_ns,
             "queue_ew": queue_ew,
+            "queue_ns_left": queue_ns_left,
+            "queue_ew_left": queue_ew_left,
             "total_queue": total_queue,
             "phase": float(new_phase),
-            "duration": float(new_duration),
+            "throughput": throughput,
+            "left_starve": left_starve,
         }
         return self._encode_obs(obs), float(reward), done, info
 
     def _encode_obs(self, obs: dict[str, float]) -> np.ndarray:
-        """Encode engine observation dict to 6-float RL state vector.
+        """Encode engine observation dict to 8-float RL state vector (STATE_DIM=8).
 
         Features
         --------
-        0  phase_elapsed_norm    : phase_elapsed / 60
-        1  cycle_length_norm     : current_duration / 60
-        2  queue_ns_norm         : queue_ns / max_queue
-        3  queue_ew_norm         : queue_ew / max_queue
-        4  time_of_day_norm      : time_of_day in [0, 1]
-        5  upstream_queue_norm   : upstream_queue / max_queue
+        0  phase_elapsed_norm      : phase_elapsed / 60
+        1  current_phase_idx_norm  : current_phase_idx / 3
+        2  queue_ns_through_norm   : queue_ns / max_queue
+        3  queue_ew_through_norm   : queue_ew / max_queue
+        4  queue_ns_left_norm      : queue_ns_left / 120
+        5  queue_ew_left_norm      : queue_ew_left / 120
+        6  time_of_day_norm        : time_of_day in [0, 1]
+        7  upstream_queue_norm     : upstream_queue / max_queue
         """
-        max_q = float(self.config.max_queue)
+        max_q = max(self.config.max_queue, 1.0)
         return np.array(
             [
                 obs.get("phase_elapsed", 0.0) / 60.0,
-                float(self._current_duration) / 60.0,
+                float(self._current_phase) / 3.0,
                 obs.get("queue_ns", 0.0) / max_q,
                 obs.get("queue_ew", 0.0) / max_q,
+                obs.get("queue_ns_left", 0.0) / 120.0,
+                obs.get("queue_ew_left", 0.0) / 120.0,
                 obs.get("time_of_day_normalized", 0.0),
-                obs.get("upstream_queue", 0.0) / max(max_q, 1.0),
+                obs.get("upstream_queue", 0.0) / max_q,
             ],
             dtype=np.float32,
         )

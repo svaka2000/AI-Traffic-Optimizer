@@ -8,7 +8,7 @@ of ALL neighboring intersections (centralized training, decentralized execution)
 
 Architecture
 ------------
-Actor  : local_obs (augmented with neighbor queues) → 128 → 64 → 2 logits
+Actor  : local_obs (augmented with neighbor queues) → 128 → 64 → 4 logits
          Discrete actions via Gumbel-Softmax during training; argmax at inference.
 Critic : concat([all_obs, all_actions]) → 256 → 128 → 1  (Q-value)
 
@@ -28,6 +28,13 @@ import torch.optim as optim
 
 from traffic_ai.simulation_engine.types import SignalPhase
 
+# Phase index → SignalPhase string (4-phase model, AITO Phase 3)
+_PHASE_IDX_TO_STR: dict[int, str] = {
+    0: "NS_THROUGH",
+    1: "EW_THROUGH",
+    2: "NS_LEFT",
+    3: "EW_LEFT",
+}
 
 # ---------------------------------------------------------------------------
 # Hyper-parameters
@@ -36,7 +43,7 @@ OBS_DIM = 12          # base observation keys from IntersectionState.as_observat
 NEIGHBOR_FEATS = 2    # queue_ns, queue_ew per neighbor
 MAX_NEIGHBORS = 4     # N, S, E, W
 ACTOR_INPUT_DIM = OBS_DIM + MAX_NEIGHBORS * NEIGHBOR_FEATS  # 20
-N_ACTIONS = 2         # NS or EW
+N_ACTIONS = 4         # NS_THROUGH, EW_THROUGH, NS_LEFT, EW_LEFT (4-phase model)
 CRITIC_HIDDEN = 256
 ACTOR_HIDDEN = 128
 REPLAY_CAPACITY = 50_000
@@ -316,7 +323,7 @@ class MADDPGController:
         self._gumbel_temp = max(GUMBEL_TEMP_MIN, self._gumbel_temp * GUMBEL_ANNEAL)
 
         phase_map: Dict[int, SignalPhase] = {
-            iid: ("NS" if actions_int[iid] == 0 else "EW")
+            iid: _PHASE_IDX_TO_STR[int(actions_int[iid])]
             for iid in range(self.n)
         }
         return phase_map

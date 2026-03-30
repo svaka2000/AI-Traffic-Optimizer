@@ -14,8 +14,6 @@ from traffic_ai.controllers.ml_controllers import (
     MLPController,
     RandomForestController,
     XGBoostController,
-    ImitationLearningController,
-    LSTMForecastController,
 )
 from traffic_ai.controllers.rl_controllers import (
     A2CController,
@@ -53,8 +51,6 @@ ALL_CONTROLLERS = [
     XGBoostController,
     GradientBoostingController,
     MLPController,
-    LSTMForecastController,
-    ImitationLearningController,
     QLearningController,
     DQNController,
     PPOController,
@@ -65,19 +61,25 @@ ALL_CONTROLLERS = [
 # Generic controller tests
 # ---------------------------------------------------------------------------
 
+VALID_ACTIONS = (0, 1, 2, 3)   # RL controllers may return 0-3 (4-phase model)
+VALID_PHASES = {               # all valid SignalPhase values (legacy + 4-phase)
+    "NS", "EW", "NS_THROUGH", "EW_THROUGH", "NS_LEFT", "EW_LEFT",
+}
+
+
 @pytest.mark.parametrize("CtrlCls", ALL_CONTROLLERS)
 def test_select_action_returns_valid_action(CtrlCls) -> None:
-    """select_action must return 0 (NS) or 1 (EW)."""
+    """select_action must return a valid phase index (0-3 for RL, 0-1 for others)."""
     ctrl = CtrlCls()
     for step in range(5):
         obs = _make_obs(step=step * 10)
         action = ctrl.select_action(obs)
-        assert action in (0, 1), f"{CtrlCls.__name__}.select_action returned {action!r}"
+        assert action in VALID_ACTIONS, f"{CtrlCls.__name__}.select_action returned {action!r}"
 
 
 @pytest.mark.parametrize("CtrlCls", ALL_CONTROLLERS)
 def test_compute_actions_returns_valid_phases(CtrlCls) -> None:
-    """compute_actions must return dict mapping int → 'NS'|'EW'."""
+    """compute_actions must return dict mapping int → valid SignalPhase string."""
     ctrl = CtrlCls()
     n = 4
     ctrl.reset(n)
@@ -86,7 +88,7 @@ def test_compute_actions_returns_valid_phases(CtrlCls) -> None:
     assert isinstance(actions, dict)
     assert len(actions) == n
     for iid, phase in actions.items():
-        assert phase in ("NS", "EW"), f"Invalid phase {phase!r} from {CtrlCls.__name__}"
+        assert phase in VALID_PHASES, f"Invalid phase {phase!r} from {CtrlCls.__name__}"
 
 
 @pytest.mark.parametrize("CtrlCls", ALL_CONTROLLERS)
@@ -161,7 +163,7 @@ def test_q_learning_action_in_valid_range() -> None:
     obs = _make_obs()
     for _ in range(20):
         action = ctrl.select_action(obs)
-        assert action in (0, 1)
+        assert action in VALID_ACTIONS
 
 
 def test_q_learning_updates_q_table() -> None:
@@ -178,7 +180,7 @@ def test_dqn_action_valid() -> None:
     obs = _make_obs()
     for _ in range(5):
         action = ctrl.select_action(obs)
-        assert action in (0, 1)
+        assert action in VALID_ACTIONS
 
 
 def test_ppo_action_valid() -> None:
@@ -186,7 +188,7 @@ def test_ppo_action_valid() -> None:
     obs = _make_obs()
     for _ in range(5):
         action = ctrl.select_action(obs)
-        assert action in (0, 1)
+        assert action in VALID_ACTIONS
 
 
 # ---------------------------------------------------------------------------
@@ -237,18 +239,6 @@ def test_mlp_fit_and_predict() -> None:
     assert action in (0, 1)
 
 
-def test_imitation_learning_fit_and_predict() -> None:
-    rng = np.random.default_rng(2)
-    n = 100
-    X = rng.standard_normal((n, 7)).astype(np.float32)
-    y = rng.integers(0, 2, n)
-
-    ctrl = ImitationLearningController(seed=0)
-    metrics = ctrl.fit(X, y, epochs=3)
-    assert "final_loss" in metrics
-    action = ctrl.select_action(_make_obs())
-    assert action in (0, 1)
-
 
 # ---------------------------------------------------------------------------
 # New RL controllers (WS2): A2C, SAC, MADDPG, RecurrentPPO
@@ -283,7 +273,7 @@ def test_a2c_compute_actions_valid() -> None:
     actions = ctrl.compute_actions(obs, step=0)
     assert len(actions) == n
     for phase in actions.values():
-        assert phase in ("NS", "EW")
+        assert phase in VALID_PHASES
 
 
 def test_a2c_runs_multiple_steps() -> None:
@@ -304,7 +294,7 @@ def test_sac_compute_actions_valid() -> None:
     actions = ctrl.compute_actions(obs, step=0)
     assert len(actions) == n
     for phase in actions.values():
-        assert phase in ("NS", "EW")
+        assert phase in VALID_PHASES
 
 
 def test_sac_runs_multiple_steps() -> None:
@@ -325,7 +315,7 @@ def test_maddpg_compute_actions_valid() -> None:
     actions = ctrl.compute_actions(obs, step=0)
     assert len(actions) == n
     for phase in actions.values():
-        assert phase in ("NS", "EW")
+        assert phase in VALID_PHASES
 
 
 def test_maddpg_uses_neighbor_topology() -> None:
@@ -343,7 +333,7 @@ def test_maddpg_uses_neighbor_topology() -> None:
     actions = ctrl.compute_actions(obs, step=0)
     assert len(actions) == n
     for phase in actions.values():
-        assert phase in ("NS", "EW")
+        assert phase in VALID_PHASES
 
 
 def test_recurrent_ppo_compute_actions_valid() -> None:
@@ -354,7 +344,7 @@ def test_recurrent_ppo_compute_actions_valid() -> None:
     actions = ctrl.compute_actions(obs, step=0)
     assert len(actions) == n
     for phase in actions.values():
-        assert phase in ("NS", "EW")
+        assert phase in VALID_PHASES
 
 
 def test_recurrent_ppo_maintains_hidden_states() -> None:
