@@ -14,6 +14,7 @@ DEPLOYED_CONTROLLERS:
 """
 from traffic_ai.controllers.adaptive_rule import AdaptiveRuleController
 from traffic_ai.controllers.base import BaseController
+from traffic_ai.controllers.max_pressure import MaxPressureController
 from traffic_ai.controllers.factory import (
     build_baseline_controllers,
     build_rl_controllers,
@@ -48,6 +49,7 @@ NeuralNetworkMLPController = MLPController
 BENCHMARK_CONTROLLERS: list[type[BaseController]] = [
     FixedTimingController,
     AdaptiveRuleController,
+    MaxPressureController,
     RandomForestController,
     XGBoostController,
     NeuralNetworkMLPController,
@@ -58,6 +60,7 @@ DEPLOYED_CONTROLLERS: list[type[BaseController]] = [
     QLearningController,
     DQNController,
     PPOController,
+    MaxPressureController,
 ]
 """Production-grade RL controllers. Run in shadow mode and future real-world integration."""
 
@@ -65,6 +68,7 @@ __all__ = [
     "BaseController",
     "FixedTimingController",
     "AdaptiveRuleController",
+    "MaxPressureController",
     "RandomForestController",
     "XGBoostController",
     "GradientBoostingController",

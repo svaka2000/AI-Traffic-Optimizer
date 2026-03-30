@@ -6,6 +6,7 @@ from traffic_ai.config.settings import Settings
 from traffic_ai.controllers.adaptive_rule import AdaptiveRuleController
 from traffic_ai.controllers.base import BaseController
 from traffic_ai.controllers.fixed_timing import FixedTimingController
+from traffic_ai.controllers.max_pressure import MaxPressureController
 from traffic_ai.controllers.ml_controller import SupervisedMLController
 from traffic_ai.controllers.rl_controller import RLPolicyController
 
@@ -13,6 +14,7 @@ from traffic_ai.controllers.rl_controller import RLPolicyController
 def build_baseline_controllers(settings: Settings) -> list[BaseController]:
     fixed_cfg = settings.get("controllers.fixed_timing", {})
     adaptive_cfg = settings.get("controllers.adaptive_rule", {})
+    mp_cfg = settings.get("controllers.max_pressure", {})
     step_seconds = float(settings.get("simulation.step_seconds", 1.0))
     return [
         FixedTimingController(
@@ -24,6 +26,9 @@ def build_baseline_controllers(settings: Settings) -> list[BaseController]:
             min_green=int(adaptive_cfg.get("min_green", 15)),
             max_green=int(adaptive_cfg.get("max_green", 75)),
             queue_threshold=float(adaptive_cfg.get("queue_threshold", 6.0)),
+        ),
+        MaxPressureController(
+            min_green_sec=int(mp_cfg.get("min_green_sec", 7)),
         ),
     ]
 
