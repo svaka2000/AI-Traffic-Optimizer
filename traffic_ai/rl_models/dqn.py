@@ -55,10 +55,12 @@ class DQNPolicy:
 def train_dqn(
     env: SignalControlEnv,
     episodes: int = 220,
-    gamma: float = 0.97,
-    lr: float = 1e-3,
+    gamma: float = 0.99,
+    lr: float = 5e-4,
     batch_size: int = 128,
     seed: int = 42,
+    warmup: int = 1_000,
+    reward_scale: float = 3.0,
 ) -> tuple[DQNPolicy, list[float], Any]:
     rng = np.random.default_rng(seed)
     if not TORCH_AVAILABLE:
@@ -78,7 +80,9 @@ def train_dqn(
 
     epsilon = 1.0
     epsilon_min = 0.05
-    epsilon_decay = (epsilon - epsilon_min) / max(episodes, 1)
+    # Decay anchored to 500-episode full schedule so exploration isn't exhausted
+    # before the 4-phase policy has converged regardless of actual episode count.
+    epsilon_decay = (epsilon - epsilon_min) / max(episodes, 500)
 
     for episode in range(episodes):
         state = env.reset()
@@ -93,11 +97,12 @@ def train_dqn(
                     action = int(torch.argmax(q_values, dim=1).item())
 
             next_state, reward, done, _ = env.step(action)
-            memory.append((state, action, reward, next_state, done))
+            # Normalize reward to prevent multi-objective reward scaling from destabilising Q-targets.
+            memory.append((state, action, reward / reward_scale, next_state, done))
             state = next_state
             total_reward += reward
 
-            if len(memory) >= batch_size:
+            if len(memory) >= warmup:
                 batch_idx = rng.choice(len(memory), size=batch_size, replace=False)
                 batch = [memory[i] for i in batch_idx]
                 states = torch.tensor(np.array([b[0] for b in batch]), dtype=torch.float32)
@@ -113,6 +118,7 @@ def train_dqn(
                 loss = nn.functional.mse_loss(q_values, target)
                 optimizer.zero_grad()
                 loss.backward()
+                nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=1.0)
                 optimizer.step()
 
         epsilon = max(epsilon_min, epsilon - epsilon_decay)

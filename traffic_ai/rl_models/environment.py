@@ -65,7 +65,7 @@ class RewardWeights:
     avg_delay: float = 0.12       # weight on negative normalized queue
     ped_wait: float = 0.05        # weight on queue imbalance (fairness)
     emissions_co2: float = 0.03   # weight on CO2 proxy
-    switch_penalty: float = 2.0   # flat penalty per phase change (seconds lost)
+    switch_penalty: float = 0.1   # flat penalty per phase change; scaled to match other dimensionless weights
     throughput: float = 0.08      # weight on normalized throughput
     left_starve: float = 0.04     # weight on left-turn starvation penalty
 
