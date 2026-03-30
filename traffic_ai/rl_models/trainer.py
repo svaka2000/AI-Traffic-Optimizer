@@ -28,8 +28,14 @@ def train_rl_policy_suite(
     output_dir: Path,
     seed: int = 42,
     quick_run: bool = True,
+    full_run: bool = False,
 ) -> RLTrainingResult:
-    episodes = 35 if quick_run else 260
+    if full_run:
+        episodes = 500
+    elif quick_run:
+        episodes = 35
+    else:
+        episodes = 260
     env = SignalControlEnv(EnvConfig(seed=seed))
     policies: dict[str, Any] = {}
     rows: list[dict[str, float | str]] = []

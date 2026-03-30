@@ -48,9 +48,10 @@ class ExperimentArtifacts:
 
 
 class ExperimentRunner:
-    def __init__(self, settings: Settings, quick_run: bool = False) -> None:
+    def __init__(self, settings: Settings, quick_run: bool = False, full_run: bool = False) -> None:
         self.settings = settings
         self.quick_run = quick_run
+        self.full_run = full_run
         self.output_dir = settings.output_dir
         self.result_dir = self.output_dir / "results"
         self.plot_dir = self.output_dir / "plots"
@@ -155,6 +156,7 @@ class ExperimentRunner:
             output_dir=self.output_dir,
             seed=self.settings.seed,
             quick_run=self.quick_run,
+            full_run=self.full_run,
         )
 
     # -------------------------------------------------------------------------

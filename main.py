@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+# Load .env before any other imports so PEMS_USERNAME, PEMS_PASSWORD, etc. are set
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed; rely on shell environment
+
 import argparse
 import json
 import logging
@@ -26,6 +33,11 @@ def parse_args() -> argparse.Namespace:
         "--quick-run",
         action="store_true",
         help="Use reduced training/simulation budget for faster iteration",
+    )
+    parser.add_argument(
+        "--full-run",
+        action="store_true",
+        help="Train RL agents for 500 episodes (overnight quality run)",
     )
     parser.add_argument(
         "--ingest-only",
@@ -251,7 +263,7 @@ def main() -> None:
     if args.pems_station is not None or True:  # always try; connector handles fallback
         _maybe_calibrate_from_pems(settings, args.pems_station)
 
-    runner = ExperimentRunner(settings=settings, quick_run=args.quick_run)
+    runner = ExperimentRunner(settings=settings, quick_run=args.quick_run, full_run=args.full_run)
     artifacts = runner.run(
         ingest_only=args.ingest_only,
         include_kaggle=not args.skip_kaggle,
