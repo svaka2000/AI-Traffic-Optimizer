@@ -103,9 +103,13 @@ def train_rl_policy_suite(
     if dqn_policy is None:
         n_seeds = int(full_run) * 4 + 1  # 5 for full_run, 1 otherwise
         if full_run:
-            # 4-intersection IDQN: trains on the same 2×2 grid used in benchmarking
+            # 4-intersection IDQN: trains on a 2×2 grid.
+            # step_limit=500 keeps episode length the same as the 1-int baseline
+            # (avoids 16× compute blowup from 4-int × 2000-step).  The agent still
+            # learns 4-intersection coordination dynamics; 2000-step generalisation
+            # comes from the network topology, not episode length.
             dqn_train_env: MultiIntersectionSignalEnv | SignalControlEnv = MultiIntersectionSignalEnv(
-                EnvConfig(seed=seed, step_limit=2000),
+                EnvConfig(seed=seed, step_limit=500),
                 n_intersections=4,
             )
             dqn_policy, dqn_rewards, dqn_network = train_dqn_multi(
