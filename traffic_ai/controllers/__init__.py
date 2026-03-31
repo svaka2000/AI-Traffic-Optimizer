@@ -14,7 +14,9 @@ DEPLOYED_CONTROLLERS:
 """
 from traffic_ai.controllers.adaptive_rule import AdaptiveRuleController
 from traffic_ai.controllers.base import BaseController
+from traffic_ai.controllers.greedy_adaptive import GreedyAdaptiveController
 from traffic_ai.controllers.max_pressure import MaxPressureController
+from traffic_ai.controllers.webster import WebsterController
 from traffic_ai.controllers.factory import (
     build_baseline_controllers,
     build_rl_controllers,
@@ -49,6 +51,8 @@ NeuralNetworkMLPController = MLPController
 BENCHMARK_CONTROLLERS: list[type[BaseController]] = [
     FixedTimingController,
     AdaptiveRuleController,
+    WebsterController,           # Webster (1958) — Econolite/SCATS/MAXTIME industry standard
+    GreedyAdaptiveController,    # InSync-style greedy — deployed on Mira Mesa & Rosecrans, San Diego
     MaxPressureController,
     RandomForestController,
     XGBoostController,
@@ -68,6 +72,8 @@ __all__ = [
     "BaseController",
     "FixedTimingController",
     "AdaptiveRuleController",
+    "WebsterController",
+    "GreedyAdaptiveController",
     "MaxPressureController",
     "RandomForestController",
     "XGBoostController",

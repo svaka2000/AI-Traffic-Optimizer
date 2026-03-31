@@ -206,3 +206,71 @@ Deliver a modular, reproducible AI traffic optimization research platform with c
 - [x] Tabs: Network Overview, Benchmark Lab, Shadow Mode, Controller Training, Data & Calibration, Export.
 - [x] DecisionExplainer integrated in Controller Training tab.
 - [x] 155 tests pass.
+
+### Phase 8: Real-World Traffic Engineering Upgrade — DONE
+Based on technical briefings with City of San Diego Senior Traffic Engineer Steve Celniker
+and Caltrans District 11 Division Chief Fariba Ramos.
+
+**Phase 8A — Detailed Signal Plan Model**
+- [x] `traffic_ai/simulation_engine/signal_plan.py`: `MovementType`, `PhaseConstraints`, `DetailedSignalState`.
+- [x] HCM 7th ed. defaults: min_green=7 s, yellow=4 s, all_red=2 s, min_cycle=60 s, max_cycle=180 s.
+- [x] 5 tests in `tests/test_signal_plan.py`.
+
+**Phase 8B — Detection Reliability Model**
+- [x] `traffic_ai/simulation_engine/detection.py`: `DetectorType`, `DetectorConfig`, `DetectionSystem`.
+- [x] Loop detector: binary fail/repair (failure_rate_per_hour, repair_time_hours).
+- [x] Video detector: graded noise degradation during solar glare hours and night.
+- [x] NONE detector: always failed → fixed-timing fallback.
+- [x] 8 tests in `tests/test_detection.py`.
+
+**Phase 8C — Interconnect and Clock Drift**
+- [x] `traffic_ai/simulation_engine/interconnect.py`: `InterconnectType`, `InterconnectConfig`, `InterconnectNetwork`.
+- [x] Per-link fail/repair; stale observation substitution when link down.
+- [x] Clock drift accumulates at 0.5 s/hr (Celniker estimate); GPS sync on repair.
+
+**Phase 8D — Webster (1958) Controller**
+- [x] `traffic_ai/controllers/webster.py`: `WebsterController`.
+- [x] C_opt = (1.5×L + 5)/(1−Y); g_i proportional to phase demand.
+- [x] Oversaturation (Y ≥ 0.99) fallback to max_cycle; clamping to [min_cycle, max_cycle].
+- [x] Models Econolite Centracs, SCATS, SCOOT (industry standard for 60+ years).
+- [x] 7 tests in `tests/test_webster.py`.
+
+**Phase 8E — Greedy Adaptive (InSync) Controller**
+- [x] `traffic_ai/controllers/greedy_adaptive.py`: `GreedyAdaptiveController`.
+- [x] Cost = volume_weight×queue + delay_weight×accumulated_delay − coordination_weight×downstream_pressure.
+- [x] No fixed cycle; 10 % hysteresis prevents oscillation; min_green=7 steps.
+- [x] Models InSync (Rhythm Engineering) deployed on Mira Mesa Blvd and Rosecrans St, San Diego.
+- [x] 5 tests in `tests/test_greedy_adaptive.py`.
+
+**Phase 8F — Priority Event System**
+- [x] `traffic_ai/simulation_engine/priority.py`: `PriorityEventType`, `PriorityConfig`, `PriorityEventSystem`.
+- [x] Emergency vehicle preemption (hard override, non-negotiable).
+- [x] Bus transit signal priority (informational, no hard override).
+- [x] Leading Pedestrian Interval (LPI) green reduction at phase changes.
+- [x] 6 tests in `tests/test_priority.py`.
+
+**Phase 8G — San Diego Corridor Scenarios**
+- [x] `traffic_ai/scenarios/san_diego.py`: `SanDiegoScenario`.
+- [x] Scenarios: downtown_grid (16 int), mira_mesa_corridor (8 int), rosecrans_corridor (12 int), mixed_jurisdiction (12 int).
+- [x] Rosecrans corridor calibrated to verified 2017 results: 25 % travel time ↓, 53 % stops ↓.
+- [x] 6 tests in `tests/test_scenarios.py`.
+
+**Phase 8H/I — Engine and Experiment Runner Integration**
+- [x] `engine.py`: DetectionSystem, InterconnectNetwork, PriorityEventSystem integrated into run loop.
+- [x] `types.py`: `StepMetrics` extended with clearance_loss_sec, detector_fallback_steps, preemption_events.
+- [x] All subsystems default-disabled (backward compatible with all 157 existing tests).
+- [x] `controllers/__init__.py` and `factory.py` updated with Webster and GreedyAdaptive.
+
+**Phase 8J — Dashboard Update**
+- [x] Phase 8 sidebar panel: San Diego scenario selector, Detector Failures toggle, Priority Events toggles.
+- [x] Webster (1958) and Greedy Adaptive (InSync) added to Live Simulation controller dropdown.
+- [x] New "Industry Comparison" tab (7th tab): real-world system reference table, methodology comparison, corridor scenarios.
+- [x] Industry comparison shows clearance loss, detector uptime %, preemptions from last benchmark.
+
+**Phase 8K — Test Suite**
+- [x] 31 new tests across 6 test files (signal_plan, detection, priority, webster, greedy_adaptive, scenarios).
+- [x] All 188+ tests pass.
+
+**Phase 8L — Documentation**
+- [x] PLANS.md updated with Phase 8 section.
+- [x] README.md updated with Real-World Features, San Diego Scenarios, Industry Comparison sections.

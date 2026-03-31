@@ -3,12 +3,15 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Optional, Protocol
 
 import numpy as np
 
 from traffic_ai.simulation_engine.demand import DemandModel
+from traffic_ai.simulation_engine.detection import DetectionSystem, DetectorConfig
 from traffic_ai.simulation_engine.emissions import EmissionsCalculator
+from traffic_ai.simulation_engine.interconnect import InterconnectConfig, InterconnectNetwork
+from traffic_ai.simulation_engine.priority import PriorityConfig, PriorityEventSystem
 from traffic_ai.simulation_engine.types import (
     Direction,
     IntersectionState,
@@ -50,6 +53,10 @@ class SimulatorConfig:
     # 4-phase model parameters (AITO Phase 3)
     left_turn_arrival_fraction: float = 0.15   # left-turn share of through arrivals (HCM typical)
     left_turn_saturation_flow: float = 1200.0  # veh/hr/lane, HCM 7th ed. for protected left turns
+    # Phase 8: optional subsystem enable flags (all off by default for backward compat)
+    detection_enabled: bool = False      # DetectionSystem: loop/video failure model
+    interconnect_enabled: bool = False   # InterconnectNetwork: link failure + clock drift
+    priority_enabled: bool = False       # PriorityEventSystem: bus TSP + LPI events
 
 
 class TrafficNetworkSimulator:
@@ -82,6 +89,21 @@ class TrafficNetworkSimulator:
         # Step-by-step mode tracking
         self._env_step: int = 0
 
+        # Phase 8: optional subsystems (disabled by default)
+        det_cfg = DetectorConfig(enabled=config.detection_enabled)
+        self._detectors: dict[int, DetectionSystem] = {
+            i: DetectionSystem(det_cfg, self.rng, intersection_id=i)
+            for i in self.intersection_ids
+        }
+        int_cfg = InterconnectConfig(enabled=config.interconnect_enabled)
+        self._interconnect = InterconnectNetwork(
+            config.intersections, self.neighbors, int_cfg, self.rng
+        )
+        pri_cfg = PriorityConfig(enabled=config.priority_enabled)
+        self._priority = PriorityEventSystem(
+            pri_cfg, config.intersections, config.step_seconds, self.rng
+        )
+
     # =========================================================================
     # Batch mode: run a full episode
     # =========================================================================
@@ -98,12 +120,37 @@ class TrafficNetworkSimulator:
             self.demand.tick_incident(step)
             self._apply_emergency_events(step)
 
+            # Phase 8: update interconnect link states
+            self._interconnect.update(step, self.config.step_seconds)
+
             observations = self._collect_observations(step)
+
+            # Phase 8: apply video-detector observation degradation
+            hour = int((step / 3600.0) % 24)
+            for iid in list(observations.keys()):
+                observations[iid] = self._detectors[iid].degrade_observation(
+                    observations[iid], hour
+                )
+
+            # Phase 8: override with fixed-timing fallback for failed detectors
             actions = controller.compute_actions(observations, step)
+            fallback_count = 0
+            for iid, det in self._detectors.items():
+                det.update(step, self.config.step_seconds)
+                if det.is_failed:
+                    actions[iid] = det.fallback_action(step)  # type: ignore[assignment]
+                    fallback_count += 1
+
             actions = self._override_emergency_actions(actions)
+
+            # Phase 8: generate and apply priority event preemptions
+            self._priority.generate_events(step)
+            actions = self._priority.apply_preemptions(actions, step)  # type: ignore[assignment]
 
             self._advance_step(actions, step)
             metrics = self._compute_step_metrics(step)
+            metrics.detector_fallback_steps = fallback_count
+            metrics.preemption_events = self._priority.active_preemption_count
             if baseline_reference_queue is None:
                 baseline_reference_queue = max(metrics.total_queue, 1.0)
             metrics.delay_reduction_pct = max(
@@ -163,7 +210,15 @@ class TrafficNetworkSimulator:
         self.demand.tick_emergency(step)
         self.demand.tick_incident(step)
         self._apply_emergency_events(step)
+
+        # Phase 8 subsystems (no-ops when disabled)
+        self._interconnect.update(step, self.config.step_seconds)
+        for det in self._detectors.values():
+            det.update(step, self.config.step_seconds)
+
         actions = self._override_emergency_actions(actions)
+        self._priority.generate_events(step)
+        actions = self._priority.apply_preemptions(actions, step)  # type: ignore[assignment]
 
         self._advance_step(actions, step)
         metrics = self._compute_step_metrics(step)
@@ -425,7 +480,13 @@ class TrafficNetworkSimulator:
     # =========================================================================
 
     def _collect_observations(self, step: int) -> dict[int, dict[str, float]]:
-        """Collect per-intersection observations, including upstream and directional neighbor queues."""
+        """Collect per-intersection observations, including upstream and directional neighbor queues.
+
+        When the interconnect subsystem is enabled, neighbour observations are
+        filtered through InterconnectNetwork (stale averages substituted for
+        down links).  Per-direction queue keys (neighbor_N/S/E/W_queue) are
+        used by MaxPressure (Varaiya 2013) and other network-aware controllers.
+        """
         obs: dict[int, dict[str, float]] = {}
         for intersection_id, state in self.states.items():
             neighbor_map = self.neighbors[intersection_id]
@@ -440,11 +501,18 @@ class TrafficNetworkSimulator:
             # and available to any other network-aware controller.
             for direction in ("N", "S", "E", "W"):
                 nid = neighbor_map.get(direction)
-                o[f"neighbor_{direction}_queue"] = (
-                    self.states[nid].total_queue
-                    if nid is not None and nid in self.states
-                    else 0.0
-                )
+                if nid is not None and nid in self.states:
+                    nbr_live = self.states[nid].total_queue
+                    # Interconnect filtering: substitute stale avg when link is down
+                    nbr_obs_full = {"total_queue": nbr_live}
+                    nbr_filtered = self._interconnect.get_neighbor_obs(
+                        intersection_id, nid, nbr_obs_full
+                    )
+                    o[f"neighbor_{direction}_queue"] = nbr_filtered.get("total_queue", nbr_live)
+                    # Update history with live data
+                    self._interconnect.update_history(nid, {"total_queue": nbr_live})
+                else:
+                    o[f"neighbor_{direction}_queue"] = 0.0
             obs[intersection_id] = o
         return obs
 
@@ -538,6 +606,10 @@ class TrafficNetworkSimulator:
             "total_fuel_gallons": float(sum(item.fuel_gallons for item in logs)),
             "total_co2_kg": float(sum(item.co2_kg for item in logs)),
             "total_emissions_co2_kg": float(sum(item.emissions_co2_kg for item in logs)),
+            # Phase 8 metrics
+            "total_clearance_loss_sec": float(sum(item.clearance_loss_sec for item in logs)),
+            "total_detector_fallback_steps": float(sum(item.detector_fallback_steps for item in logs)),
+            "total_preemption_events": float(sum(item.preemption_events for item in logs)),
         }
 
     # =========================================================================

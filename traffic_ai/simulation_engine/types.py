@@ -169,6 +169,10 @@ class StepMetrics:
     co2_kg: float = 0.0
     # First-class EPA MOVES2014b emission metric
     emissions_co2_kg: float = 0.0
+    # Phase 8: signal physics, detection, and priority event metrics
+    clearance_loss_sec: float = 0.0       # seconds lost to yellow+all-red this step
+    detector_fallback_steps: int = 0      # intersections in fixed-timing fallback
+    preemption_events: int = 0            # active emergency preemptions this step
 
 
 @dataclass(slots=True)

@@ -69,6 +69,46 @@ simulation:
     # HCM-aligned default (replaces the previously hardcoded 0.65 which had no cited source).
     turning_movement_factor: 0.60
 
+  # Phase 8: optional subsystem flags (all disabled by default for backward compat)
+  detection_enabled: false       # DetectionSystem: inductive loop / video failure model
+  interconnect_enabled: false    # InterconnectNetwork: link failure + clock drift
+  priority_enabled: false        # PriorityEventSystem: bus TSP + LPI events
+
+# Phase 8: detection reliability model
+# (per Steve Celniker, City of San Diego Senior Traffic Engineer)
+detection:
+  enabled: false
+  default_type: inductive_loop   # loop, video, radar, none
+  failure_rate_per_hour: 0.001   # ~1 % per month for inductive loop detectors (FHWA, 2006)
+  repair_time_hours: 24.0        # Loop repair requires street crew — typical 24–48 hr MTTR
+  video_glare_hours: [7, 8, 17, 18]  # San Diego sunrise/sunset solar glare windows
+  video_night_degradation: 0.30  # 30 % accuracy loss at night (hours 20–06)
+
+# Phase 8: interconnect and clock drift
+# (per Steve Celniker: "copper/fiber cut by construction workers; clocks drift")
+interconnect:
+  enabled: false
+  type: fiber                    # fiber, copper, wireless, none
+  failure_rate_per_hour: 0.0005  # ~4 outages/yr per link (less frequent than detectors)
+  repair_time_hours: 48.0        # Trenching required for fibre/copper
+  wireless_packet_loss: 0.05     # 5 % packet loss on wireless links
+  clock_drift_sec_per_hour: 0.5  # Celniker estimate: 0.5 s/hr without GPS sync
+  gps_sync_enabled: true         # Re-synchronise clocks on link repair
+
+# Phase 8: priority events
+# (per Steve Celniker: "emergency vehicles, bus priority, and LPIs delay everybody")
+priority:
+  enabled: false
+  emergency_enabled: true
+  emergency_rate_per_hour_per_intersection: 0.15  # ~4 events/hr across 4 intersections
+  emergency_duration_sec_min: 15.0
+  emergency_duration_sec_max: 30.0
+  bus_priority_enabled: true
+  bus_rate_per_hour_per_intersection: 2.0
+  lpi_enabled: true
+  lpi_duration_sec: 5.0
+  lpi_probability_per_phase_change: 0.30
+
 controllers:
   fixed_timing:
     cycle_seconds: 30
@@ -82,6 +122,20 @@ controllers:
     min_green: 15
     max_green: 75
     queue_threshold: 6
+  # Webster (1958) — industry standard (Econolite Centracs, SCATS, MAXTIME, SynchroGreen)
+  webster:
+    recalc_interval: 300         # Steps between recalculations (300 = 5 min at 1 s/step)
+    saturation_flow: 0.5         # veh/s/lane = 1 800 veh/hr/lane (HCM 7th ed.)
+    lost_time_per_phase: 6.0     # yellow(4 s) + all-red(2 s) per HCM 7th ed. §19.6
+    min_cycle: 60.0              # Webster lower bound (seconds)
+    max_cycle: 180.0             # Webster upper bound (seconds)
+  # Greedy adaptive — models InSync (Rhythm Engineering), deployed on Mira Mesa Blvd
+  # and Rosecrans St (Hancock to Nimitz) in San Diego
+  greedy_adaptive:
+    min_green_steps: 7           # MUTCD minimum green (7 s at 1 s/step)
+    volume_weight: 1.0           # 1 cookie per waiting vehicle (Rhythm whitepaper)
+    delay_weight: 0.2            # 1 cookie per 5 s of waiting (= 1/5, Rhythm whitepaper)
+    coordination_weight: 0.3     # Downstream-queue penalty weight
   supervised:
     enabled: true
     models: [random_forest, gradient_boosting, xgboost, mlp, lstm, imitation]

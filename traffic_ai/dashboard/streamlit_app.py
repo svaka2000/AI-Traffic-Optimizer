@@ -174,6 +174,8 @@ CONTROLLER_DISPLAY_NAMES: dict[str, str] = {
     "fixed_timing": "Fixed Timing",
     "adaptive_rule": "Adaptive Rule",
     "rule_based": "Rule-Based",
+    "webster": "Webster (1958)",
+    "greedy_adaptive": "Greedy Adaptive (InSync)",
     "ml_randomforestclassifier": "Random Forest",
     "ml_xgbclassifier": "XGBoost",
     "ml_gradientboostingclassifier": "Gradient Boosting",
@@ -200,6 +202,7 @@ CONTROLLER_DISPLAY_NAMES: dict[str, str] = {
 
 CONTROLLER_BADGES: dict[str, str] = {
     "fixed_timing": "baseline", "adaptive_rule": "adaptive", "rule_based": "adaptive",
+    "webster": "adaptive", "greedy_adaptive": "adaptive",
     "random_forest": "ml", "gradient_boosting": "ml", "xgboost": "ml", "mlp": "ml",
     "q_learning": "rl", "dqn": "rl", "policy_gradient": "rl", "a2c": "rl",
     "sac": "rl", "maddpg": "rl", "recurrent_ppo": "rl",
@@ -285,6 +288,38 @@ def _render_sidebar() -> None:
             st.session_state["fault_noise_std"]    = st.slider("Noise Std",    0.0, 0.5, 0.05, step=0.01)
             st.session_state["fault_dropout_prob"] = st.slider("Dropout Prob", 0.0, 0.2, 0.01, step=0.01)
 
+        with st.expander("Phase 8 — Real-World Subsystems", expanded=False):
+            st.markdown("**San Diego Scenario**")
+            sd_scenario_opts = {
+                "Custom (sidebar settings)": None,
+                "Downtown Grid (16 int)": "downtown_grid",
+                "Mira Mesa Corridor (8 int)": "mira_mesa_corridor",
+                "Rosecrans Corridor (12 int)": "rosecrans_corridor",
+                "Mixed Jurisdiction (12 int)": "mixed_jurisdiction",
+            }
+            sd_sel = st.selectbox("Scenario", list(sd_scenario_opts.keys()), key="sd_scenario")
+            st.session_state["sd_scenario_key"] = sd_scenario_opts[sd_sel]
+
+            st.markdown("**Detector Reliability**")
+            st.session_state["detection_enabled"] = st.checkbox(
+                "Enable Detector Failures", value=False, key="det_enabled"
+            )
+            if st.session_state["detection_enabled"]:
+                st.session_state["detector_failure_rate"] = st.slider(
+                    "Failure Rate (per hour)", 0.0, 0.05, 0.001, step=0.001,
+                    format="%.3f", key="det_fail_rate"
+                )
+            else:
+                st.session_state["detector_failure_rate"] = 0.001
+
+            st.markdown("**Priority Events**")
+            st.session_state["priority_enabled"]  = st.checkbox(
+                "Enable Emergency Preemption", value=False, key="prio_enabled"
+            )
+            st.session_state["bus_priority_enabled"] = st.checkbox(
+                "Enable Bus Priority (TSP)", value=False, key="bus_prio_enabled"
+            )
+
         st.markdown("---")
         st.markdown(
             '<div style="color:#7A9AB5;font-size:11px;text-align:center;">'
@@ -325,6 +360,8 @@ def _tab_network_overview() -> None:
     ctrl_options = {
         "Fixed Timing": "fixed_timing",
         "Adaptive Rule": "adaptive_rule",
+        "Webster (1958)": "webster",
+        "Greedy Adaptive (InSync)": "greedy_adaptive",
         "Q-Learning": "q_learning",
         "DQN": "dqn",
         "PPO": "ppo",
@@ -346,31 +383,28 @@ def _tab_network_overview() -> None:
 def _run_live_simulation(ctrl_key: str) -> None:
     """Run a simulation and display live step metrics."""
     from traffic_ai.simulation_engine.engine import SimulatorConfig, TrafficNetworkSimulator
-    from traffic_ai.controllers.fixed import FixedTimingController
-    from traffic_ai.controllers.rule_based import RuleBasedController
 
-    ctrl_map = {
-        "fixed_timing": FixedTimingController,
-        "adaptive_rule": RuleBasedController,
-    }
-    try:
-        if ctrl_key in ("q_learning", "dqn", "ppo"):
-            from traffic_ai.controllers.rl_controllers import (
-                QLearningController, DQNController, PPOController,
-            )
-            ctrl_map.update({"q_learning": QLearningController, "dqn": DQNController, "ppo": PPOController})
-    except ImportError:
-        pass
-
-    CtrlCls = ctrl_map.get(ctrl_key, FixedTimingController)
+    CtrlCls = _get_controller_class(ctrl_key)
     ctrl = CtrlCls()
 
-    steps = st.session_state.get("sim_steps", 300)
-    n = st.session_state.get("sim_intersections", 4)
-    profile = st.session_state.get("demand_profile", "rush_hour")
-    scale = st.session_state.get("demand_scale", 1.0)
-
-    cfg = SimulatorConfig(steps=steps, intersections=n, demand_profile=profile, demand_scale=scale, seed=42)
+    # Respect San Diego scenario selection (overrides sidebar sliders if set)
+    sd_key = st.session_state.get("sd_scenario_key")
+    if sd_key:
+        from traffic_ai.scenarios.san_diego import SanDiegoScenario
+        cfg = SanDiegoScenario.get_scenario(sd_key)
+        n = cfg.intersections
+        steps = cfg.steps
+    else:
+        steps = st.session_state.get("sim_steps", 300)
+        n = st.session_state.get("sim_intersections", 4)
+        profile = st.session_state.get("demand_profile", "rush_hour")
+        scale = st.session_state.get("demand_scale", 1.0)
+        cfg = SimulatorConfig(
+            steps=steps, intersections=n, demand_profile=profile, demand_scale=scale,
+            seed=42,
+            detection_enabled=st.session_state.get("detection_enabled", False),
+            priority_enabled=st.session_state.get("priority_enabled", False),
+        )
     engine = TrafficNetworkSimulator(cfg)
     ctrl.reset(n)
     obs = engine.reset_env()
@@ -596,10 +630,14 @@ def _tab_shadow_mode() -> None:
 def _get_controller_class(key: str):
     from traffic_ai.controllers.fixed import FixedTimingController
     from traffic_ai.controllers.rule_based import RuleBasedController
+    from traffic_ai.controllers.webster import WebsterController
+    from traffic_ai.controllers.greedy_adaptive import GreedyAdaptiveController
     mapping = {
         "fixed_timing": FixedTimingController,
         "adaptive_rule": RuleBasedController,
         "rule_based": RuleBasedController,
+        "webster": WebsterController,
+        "greedy_adaptive": GreedyAdaptiveController,
     }
     try:
         from traffic_ai.controllers.rl_controllers import (
@@ -980,6 +1018,99 @@ def _tab_export() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Tab 7: Industry Comparison
+# ---------------------------------------------------------------------------
+
+def _tab_industry_comparison() -> None:
+    st.markdown("## Industry Comparison")
+    st.markdown(
+        "How AITO controllers compare to the industry systems they model, "
+        "based on publicly verified real-world deployments."
+    )
+
+    # Real-world system reference table
+    st.markdown('<div class="section-header">Real-World System Reference</div>', unsafe_allow_html=True)
+    industry_data = {
+        "AITO Controller": [
+            "Webster (1958)", "Greedy Adaptive (InSync)", "Greedy Adaptive (InSync)",
+            "DQN (IDQN)", "Fixed Timing",
+        ],
+        "Industry System Modelled": [
+            "SCATS / SCOOT / Econolite Centracs", "InSync (Rhythm Engineering)",
+            "InSync (Rhythm Engineering)", "Research RL (various)", "Legacy fixed-time",
+        ],
+        "Real-World Deployment": [
+            "Worldwide (50+ countries)", "Mira Mesa Blvd, San Diego",
+            "Rosecrans St (Hancock→Nimitz), San Diego", "Lab / simulation", "Most US cities pre-2000",
+        ],
+        "Verified Improvement": [
+            "5–15 % over fixed timing (FHWA 2005)", "N/A (same corridor)",
+            "25 % travel time ↓, 53 % stops ↓ (Mayor Faulconer 2017)",
+            "20–40 % over rule-based (Liang 2019)", "Baseline (0 %)",
+        ],
+        "Source / Citation": [
+            "Webster (1958), HCM 7th ed.", "Rhythm Engineering whitepaper (2017)",
+            "San Diego Mayor's Office press release (2017)",
+            "Liang et al. ITSC 2019; Mannion et al. AAMAS 2016",
+            "MUTCD, ITE Signal Timing Manual",
+        ],
+    }
+    st.dataframe(pd.DataFrame(industry_data), use_container_width=True)
+
+    # Methodology comparison
+    st.markdown('<div class="section-header">Methodology Comparison</div>', unsafe_allow_html=True)
+    method_data = {
+        "Controller": ["Fixed Timing", "Webster (1958)", "Greedy Adaptive (InSync)", "DQN (IDQN)"],
+        "Category": ["Baseline", "Classical Adaptive", "Real-Time Adaptive", "Deep RL"],
+        "Cycle Length": ["Fixed", "Optimised (C_opt formula)", "No fixed cycle", "Learned policy"],
+        "Look-Ahead": ["None", "None (uses buffer avg)", "None (greedy)", "Implicit (replay buffer)"],
+        "Requires Detector": ["No", "Yes (queue counts)", "Yes (queue counts)", "Yes (full obs)"],
+        "Coordination": ["None", "None", "Downstream queue penalty", "Network state in obs"],
+        "Industry Standard": ["Yes (legacy)", "Yes (SCATS/SCOOT era)", "Yes (InSync/SynchroGreen)", "Emerging"],
+    }
+    st.dataframe(pd.DataFrame(method_data), use_container_width=True)
+
+    # San Diego corridor validation
+    st.markdown('<div class="section-header">San Diego Corridor Scenarios</div>', unsafe_allow_html=True)
+    st.markdown(
+        "Run GreedyAdaptive vs FixedTiming on the Rosecrans corridor to validate "
+        "the simulation reproduces the real-world 25 % improvement. "
+        "Select **Rosecrans Corridor** in the sidebar Phase 8 panel, then run in Network Overview."
+    )
+    corridor_data = {
+        "Scenario": ["downtown_grid", "mira_mesa_corridor", "rosecrans_corridor", "mixed_jurisdiction"],
+        "Intersections": [16, 8, 12, 12],
+        "Demand Scale": [1.8, 2.2, 1.6, 1.5],
+        "Validation Target": [
+            "Fixed timing near-optimal (dense urban)",
+            "GreedyAdaptive best (InSync deployed here)",
+            "GreedyAdaptive 25 %+ over Fixed (Faulconer 2017)",
+            "Cross-jurisdiction coordination gap",
+        ],
+        "Real-World Basis": [
+            "Downtown SD / Hillcrest (Steve Celniker briefing)",
+            "Mira Mesa Blvd, ADT 50k+ (Celniker)",
+            "Rosecrans St Hancock→Nimitz (Mayor 2017)",
+            "I-5 / El Camino Real, SD + Caltrans boundary",
+        ],
+    }
+    st.dataframe(pd.DataFrame(corridor_data), use_container_width=True)
+
+    # Phase 8 subsystem KPIs (from last benchmark run if available)
+    summary_df, _ = _load_artifacts_df()
+    if summary_df is not None and not summary_df.empty:
+        phase8_cols = [c for c in ["controller", "total_clearance_loss_sec",
+                                    "total_detector_fallback_steps", "total_preemption_events"]
+                       if c in summary_df.columns]
+        if len(phase8_cols) > 1:
+            st.markdown('<div class="section-header">Phase 8 Subsystem KPIs (Last Benchmark)</div>',
+                        unsafe_allow_html=True)
+            st.dataframe(summary_df[phase8_cols].copy().assign(
+                controller=summary_df["controller"].apply(_display_name)
+            ), use_container_width=True)
+
+
+# ---------------------------------------------------------------------------
 # Main app
 # ---------------------------------------------------------------------------
 
@@ -993,13 +1124,14 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "🌐 Network Overview",
         "🔬 Benchmark Lab",
         "👁 Shadow Mode",
         "🎓 Controller Training",
         "📊 Data & Calibration",
         "📤 Export",
+        "🏙 Industry Comparison",
     ])
 
     with tab1:
@@ -1014,6 +1146,8 @@ def main() -> None:
         _tab_data_calibration()
     with tab6:
         _tab_export()
+    with tab7:
+        _tab_industry_comparison()
 
 
 if __name__ == "__main__":

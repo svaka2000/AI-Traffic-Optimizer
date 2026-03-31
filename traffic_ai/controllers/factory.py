@@ -6,15 +6,19 @@ from traffic_ai.config.settings import Settings
 from traffic_ai.controllers.adaptive_rule import AdaptiveRuleController
 from traffic_ai.controllers.base import BaseController
 from traffic_ai.controllers.fixed_timing import FixedTimingController
+from traffic_ai.controllers.greedy_adaptive import GreedyAdaptiveController
 from traffic_ai.controllers.max_pressure import MaxPressureController
 from traffic_ai.controllers.ml_controller import SupervisedMLController
 from traffic_ai.controllers.rl_controller import RLPolicyController
+from traffic_ai.controllers.webster import WebsterController
 
 
 def build_baseline_controllers(settings: Settings) -> list[BaseController]:
-    fixed_cfg = settings.get("controllers.fixed_timing", {})
+    fixed_cfg    = settings.get("controllers.fixed_timing", {})
     adaptive_cfg = settings.get("controllers.adaptive_rule", {})
-    mp_cfg = settings.get("controllers.max_pressure", {})
+    mp_cfg       = settings.get("controllers.max_pressure", {})
+    webster_cfg  = settings.get("controllers.webster", {})
+    greedy_cfg   = settings.get("controllers.greedy_adaptive", {})
     step_seconds = float(settings.get("simulation.step_seconds", 1.0))
     return [
         FixedTimingController(
@@ -26,6 +30,20 @@ def build_baseline_controllers(settings: Settings) -> list[BaseController]:
             min_green=int(adaptive_cfg.get("min_green", 15)),
             max_green=int(adaptive_cfg.get("max_green", 75)),
             queue_threshold=float(adaptive_cfg.get("queue_threshold", 6.0)),
+        ),
+        WebsterController(
+            recalc_interval=int(webster_cfg.get("recalc_interval", 300)),
+            saturation_flow=float(webster_cfg.get("saturation_flow", 0.5)),
+            lost_time_per_phase=float(webster_cfg.get("lost_time_per_phase", 6.0)),
+            min_cycle=float(webster_cfg.get("min_cycle", 60.0)),
+            max_cycle=float(webster_cfg.get("max_cycle", 180.0)),
+            step_seconds=step_seconds,
+        ),
+        GreedyAdaptiveController(
+            min_green_steps=int(greedy_cfg.get("min_green_steps", 7)),
+            volume_weight=float(greedy_cfg.get("volume_weight", 1.0)),
+            delay_weight=float(greedy_cfg.get("delay_weight", 0.2)),
+            coordination_weight=float(greedy_cfg.get("coordination_weight", 0.3)),
         ),
         MaxPressureController(
             min_green_sec=int(mp_cfg.get("min_green_sec", 7)),
