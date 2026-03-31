@@ -92,9 +92,48 @@ class DemandModel:
     _incident_active: bool = field(default=False, init=False, repr=False, compare=False)
     _incident_direction: str = field(default="E", init=False, repr=False, compare=False)
     _incident_capacity_fraction: float = field(default=1.0, init=False, repr=False, compare=False)
+    # Phase 9C: real PeMS hourly calibration profile (hour → arrival_rate_per_sec)
+    _pems_profile: dict[int, float] | None = field(default=None, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self._rng = random.Random(self.seed)
+
+    # ------------------------------------------------------------------
+    # Phase 9C: PeMS calibration
+    # ------------------------------------------------------------------
+
+    def calibrate_from_pems_profile(
+        self, hourly_profile: dict[int, float]
+    ) -> None:
+        """Calibrate demand from a real PeMS hourly arrival-rate profile.
+
+        When a PeMS profile is loaded, ``arrival_rate_per_lane`` returns the
+        real data rate for the current hour instead of the synthetic Gaussian
+        peaks.  The global ``scale`` multiplier is still applied on top.
+
+        Rush-hour scaling (``_rush_hour`` etc.) is bypassed in PeMS mode;
+        the calibrated rates already encode the real demand shape.
+
+        Parameters
+        ----------
+        hourly_profile:
+            Dict mapping hour (0–23) → mean arrival_rate_per_sec per lane.
+            Produced by ``PeMSConnector.compute_hourly_demand_profile()``.
+
+        Key formula (from PeMS documentation)::
+
+            PeMS gives: total_flow_per_5min (vehicles per 5 minutes, all lanes)
+            AITO needs: arrival_rate_per_sec per lane
+
+            flow_per_lane_per_5min = total_flow_per_5min / n_lanes
+            arrival_rate_per_sec   = flow_per_lane_per_5min / 300.0
+
+            Example — Station 400456 (I-5, ~6 lanes), 7am rush:
+              PeMS total flow: ~360 veh/5min
+              Per lane: 360 / 6 = 60 veh/5min
+              Per sec:  60 / 300 = 0.20 veh/sec/lane  ← realistic rush-hour rate
+        """
+        self._pems_profile = dict(hourly_profile)
 
     # ------------------------------------------------------------------
     # Public interface
@@ -117,6 +156,13 @@ class DemandModel:
         """
         hour = self._hour_of_day(step)
         base = 0.12
+
+        # Phase 9C: when calibrated from real PeMS data, use the real hourly
+        # rate directly (already captures the demand shape; skip synthetic peaks).
+        if self._pems_profile is not None:
+            hour_int = int(hour) % 24
+            rate = self._pems_profile.get(hour_int, base)
+            return max(0.02, rate * self.scale)
 
         profile = self.profile
         if profile == "rush_hour":

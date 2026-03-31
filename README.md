@@ -187,7 +187,65 @@ print(result.natural_language)
 
 ---
 
-## PeMS Calibration
+## Using Real Traffic Data (PeMS)
+
+AITO can be calibrated to real San Diego freeway detector data from
+Caltrans PeMS (Performance Measurement System).
+
+### How to Download PeMS Data
+
+1. Log in at **pems.dot.ca.gov** (free account required)
+2. Navigate to: **Data → Clearinghouse**
+3. Set filters:
+   - Type: **Station 5-Minute**
+   - District: **11** (San Diego)
+   - Station ID: **400456** (I-5 near downtown San Diego)
+   - Date range: any recent weekday week
+4. Download the CSV file
+5. Place it at: `data/raw/pems_station_400456.csv`
+
+### Run Rosecrans Corridor Validation
+
+```bash
+python main.py --validate-rosecrans
+```
+
+This compares GreedyAdaptive (InSync-style) against FixedTiming on the
+12-signal Rosecrans corridor, calibrated to your PeMS data, and reports
+how close the result is to the **verified 25% improvement** from the 2017
+San Diego deployment.
+
+Example output:
+
+```
+============================================================
+AITO — Rosecrans Corridor Validation
+============================================================
+Demand source:    real_pems: pems_station_400456.csv (5 days, 1440 rows)
+Simulation steps: 2000
+
+SIMULATION RESULTS:
+  FixedTiming avg wait:    30.09 s
+  GreedyAdaptive avg wait: 22.31 s
+  Simulated improvement:   25.9%
+
+REAL-WORLD BENCHMARK (2017):
+  Travel time reduction:   25.0%
+  Source: San Diego Mayor Kevin Faulconer, March 2017.
+
+CALIBRATION ASSESSMENT:
+  Gap from benchmark:      0.9 percentage points
+  STATUS: PASS — within ±10 pp tolerance
+  Simulation is well-calibrated to San Diego conditions.
+============================================================
+```
+
+### Without PeMS Data
+
+The system falls back to synthetic demand profiles automatically.
+Results are labeled `"synthetic"` in all outputs and the dashboard.
+
+### API-Based Calibration (Legacy)
 
 ```bash
 export PEMS_API_KEY=your_key_here

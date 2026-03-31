@@ -85,6 +85,16 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--validate-rosecrans",
+        action="store_true",
+        help=(
+            "Run Rosecrans corridor validation: calibrate to real PeMS demand "
+            "profiles (or synthetic fallback) and compare GreedyAdaptive vs "
+            "FixedTiming. Attempts to reproduce the verified 25%% travel time "
+            "reduction from the 2017 San Diego deployment."
+        ),
+    )
+    parser.add_argument(
         "--shadow-mode",
         action="store_true",
         help=(
@@ -253,6 +263,21 @@ def main() -> None:
         settings.payload["project"]["output_dir"] = args.output_dir
         settings.output_dir.mkdir(parents=True, exist_ok=True)
     set_global_seed(settings.seed)
+
+    # Rosecrans corridor validation (Phase 9)
+    if getattr(args, "validate_rosecrans", False):
+        from traffic_ai.validation.rosecrans_validator import RosecransValidator
+        validator = RosecransValidator(
+            raw_data_dir=settings.raw_data_dir,
+            output_dir=settings.output_dir,
+            n_steps=2000,
+            seed=settings.seed,
+        )
+        result = validator.run()
+        for line in result.summary_lines():
+            print(line)
+        print(f"\nFull report saved to: {settings.output_dir / 'validation_report.json'}")
+        return
 
     # PeMS calibration test
     if args.pems_calibrate:

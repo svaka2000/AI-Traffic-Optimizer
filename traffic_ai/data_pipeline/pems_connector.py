@@ -38,6 +38,38 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
+# Schema for Phase 9A CSV adapter output
+_PEMS_CSV_SCHEMA: list[str] = [
+    "timestamp",
+    "station_id",
+    "hour_of_day",
+    "day_of_week",
+    "is_rush_hour",
+    "total_flow_per_5min",
+    "flow_per_lane_per_5min",
+    "arrival_rate_per_sec",
+    "occupancy",
+    "avg_speed_mph",
+    "pct_observed",
+    "data_quality_ok",
+]
+
+
+def _find_col(col_lower: dict[str, str], candidates: list[str]) -> str | None:
+    """Return the first matching column name (case-insensitive), or None."""
+    for candidate in candidates:
+        if candidate in col_lower:
+            return col_lower[candidate]
+    return None
+
+
+def _safe_float(value: object, default: float) -> float:
+    """Convert value to float; return default on any failure."""
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
 _DEFAULT_STATION: int = 400456           # I-5 near downtown San Diego
 _PEMS_API_BASE: str = "https://pems.dot.ca.gov"
 _ENV_VAR_API_KEY: str = "PEMS_API_KEY"       # optional token-based auth
@@ -155,6 +187,218 @@ class PeMSConnector:
                 "for station %d.", exc, self.station_id
             )
             return self._synthetic_fallback(date_from, date_to)
+
+    # ------------------------------------------------------------------
+    # Phase 9A: PeMS CSV file adapter
+    # ------------------------------------------------------------------
+
+    def load_from_csv(self, path: Path) -> pd.DataFrame:
+        """Parse a PeMS Station 5-Minute CSV export into AITO's unified schema.
+
+        PeMS 5-minute station CSV files (from Data Clearinghouse at
+        pems.dot.ca.gov → Data → Station 5-Minute → District 11) have this
+        column layout::
+
+            Timestamp, Station, District, Freeway, Direction, Lane Type,
+            Station Length, Samples, % Observed, Total Flow,
+            Avg Occupancy, Avg Speed,
+            Lane 1 Flow, Lane 1 Avg Occ, Lane 1 Avg Speed, Lane 1 Observed,
+            Lane 2 Flow, ...
+
+        The method tolerates missing columns, bad rows, and messy quoting.
+        Rows with malformed timestamps or missing Total Flow are skipped with
+        a debug log rather than a crash.
+
+        Parameters
+        ----------
+        path:
+            Absolute or relative path to the PeMS station CSV.
+
+        Returns
+        -------
+        DataFrame with columns:
+            timestamp, station_id, hour_of_day, day_of_week, is_rush_hour,
+            total_flow_per_5min, flow_per_lane_per_5min, arrival_rate_per_sec,
+            occupancy, avg_speed_mph, pct_observed, data_quality_ok
+        """
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"PeMS CSV not found: {path}")
+
+        try:
+            raw = pd.read_csv(path, low_memory=False)
+        except Exception as exc:
+            logger.warning("Failed to read PeMS CSV %s: %s — returning empty frame.", path, exc)
+            return pd.DataFrame(columns=_PEMS_CSV_SCHEMA)
+
+        rows: list[dict] = []
+
+        # --- locate key columns case-insensitively ---
+        col_lower = {c.strip().lower(): c for c in raw.columns}
+
+        ts_col      = _find_col(col_lower, ["timestamp", "time"])
+        flow_col    = _find_col(col_lower, ["total flow", "totalflow"])
+        occ_col     = _find_col(col_lower, ["avg occupancy", "avgoccupancy", "occupancy"])
+        speed_col   = _find_col(col_lower, ["avg speed", "avgspeed", "speed"])
+        pct_obs_col = _find_col(col_lower, ["% observed", "%observed", "pct observed"])
+        station_col = _find_col(col_lower, ["station"])
+
+        # count lane flow columns: "Lane N Flow" or "Lane N Avg Occ"
+        lane_flow_cols = [c for k, c in col_lower.items()
+                          if "lane" in k and "flow" in k]
+        n_lanes = max(len(lane_flow_cols), 1)
+
+        for _, row in raw.iterrows():
+            try:
+                # --- timestamp ---
+                ts_raw = row.get(ts_col, "") if ts_col else ""
+                ts = pd.to_datetime(ts_raw, errors="coerce")
+                if pd.isna(ts):
+                    logger.debug("Skipping row with unparseable timestamp: %r", ts_raw)
+                    continue
+
+                # --- station id ---
+                sid_raw = row.get(station_col, self.station_id) if station_col else self.station_id
+                try:
+                    sid = int(float(sid_raw))
+                except (ValueError, TypeError):
+                    sid = self.station_id
+
+                # --- traffic metrics ---
+                total_flow = _safe_float(row.get(flow_col, 0.0) if flow_col else 0.0, 0.0)
+                if total_flow < 0:
+                    total_flow = 0.0
+                avg_occ   = max(0.0, min(1.0, _safe_float(row.get(occ_col, 0.0) if occ_col else 0.0, 0.0)))
+                avg_speed = max(0.0, _safe_float(row.get(speed_col, 30.0) if speed_col else 30.0, 30.0))
+                pct_obs   = max(0.0, min(1.0, _safe_float(row.get(pct_obs_col, 1.0) if pct_obs_col else 1.0, 1.0)))
+
+                # --- derived fields ---
+                hour = ts.hour
+                dow  = ts.weekday()
+                is_rush = (7 <= hour <= 9) or (16 <= hour <= 18)
+                flow_per_lane = total_flow / n_lanes
+                arrival_rate  = flow_per_lane / 300.0   # vehicles per second per lane
+                data_ok = (pct_obs >= 0.5) and (total_flow >= 0)
+
+                rows.append({
+                    "timestamp":             ts,
+                    "station_id":            sid,
+                    "hour_of_day":           hour,
+                    "day_of_week":           dow,
+                    "is_rush_hour":          is_rush,
+                    "total_flow_per_5min":   int(total_flow),
+                    "flow_per_lane_per_5min": flow_per_lane,
+                    "arrival_rate_per_sec":  arrival_rate,
+                    "occupancy":             avg_occ,
+                    "avg_speed_mph":         avg_speed,
+                    "pct_observed":          pct_obs,
+                    "data_quality_ok":       data_ok,
+                })
+            except Exception as exc:  # noqa: BLE001 — never crash on a bad row
+                logger.debug("Skipping malformed PeMS row: %s", exc)
+                continue
+
+        if not rows:
+            logger.warning("PeMS CSV %s: no valid rows parsed.", path)
+            return pd.DataFrame(columns=_PEMS_CSV_SCHEMA)
+
+        df = pd.DataFrame(rows, columns=_PEMS_CSV_SCHEMA)
+        df = df.sort_values("timestamp").reset_index(drop=True)
+        logger.info(
+            "Loaded PeMS CSV %s: %d rows, %d quality-ok rows.",
+            path.name, len(df), int(df["data_quality_ok"].sum()),
+        )
+        return df
+
+    def compute_hourly_demand_profile(
+        self, df: pd.DataFrame
+    ) -> dict[int, float]:
+        """Compute mean arrival rate by hour of day from parsed PeMS data.
+
+        Filters to:
+        - ``data_quality_ok == True`` rows (pct_observed >= 0.5)
+        - Weekdays only (day_of_week 0–4) — planning-relevant demand
+
+        Returns a dict mapping hour (0–23) → mean arrival_rate_per_sec.
+
+        If fewer than 3 days of valid data exist for any hour, that hour
+        falls back to the synthetic default rate (0.12 veh/sec/lane).
+
+        Parameters
+        ----------
+        df:
+            Output of :meth:`load_from_csv`.
+        """
+        _SYNTHETIC_DEFAULT = 0.12
+
+        if df.empty or "arrival_rate_per_sec" not in df.columns:
+            return {h: _SYNTHETIC_DEFAULT for h in range(24)}
+
+        # Filter quality + weekdays
+        mask = df["data_quality_ok"] & (df["day_of_week"] <= 4)
+        filtered = df[mask].copy()
+
+        if filtered.empty:
+            return {h: _SYNTHETIC_DEFAULT for h in range(24)}
+
+        # Need date column to count distinct days per hour
+        filtered = filtered.copy()
+        filtered["_date"] = filtered["timestamp"].dt.date
+
+        profile: dict[int, float] = {}
+        for hour in range(24):
+            hourly = filtered[filtered["hour_of_day"] == hour]
+            n_days = hourly["_date"].nunique()
+            if n_days >= 3:
+                profile[hour] = float(hourly["arrival_rate_per_sec"].mean())
+            else:
+                profile[hour] = _SYNTHETIC_DEFAULT
+
+        return profile
+
+    def auto_detect_pems_files(self, raw_dir: Path) -> list[Path]:
+        """Scan raw_dir for files matching ``pems_station_*.csv`` pattern.
+
+        Returns a sorted list of matching paths.
+        """
+        return sorted(Path(raw_dir).glob("pems_station_*.csv"))
+
+    def load_best_available(
+        self, raw_dir: Path
+    ) -> tuple[pd.DataFrame | None, str]:
+        """Try to load real PeMS data; fall back to synthetic if none found.
+
+        Returns
+        -------
+        (dataframe_or_None, source_description)
+            ``source_description`` is one of:
+            - ``"real_pems: pems_station_400456.csv (N days, M rows)"``
+            - ``"synthetic: no PeMS CSV found in data/raw/"``
+        """
+        csv_files = self.auto_detect_pems_files(raw_dir)
+        if not csv_files:
+            msg = f"synthetic: no PeMS CSV found in {raw_dir}/"
+            logger.info("PeMS CSV adapter: %s — using synthetic demand profile.", msg)
+            return None, msg
+
+        # Use first (sorted) file; log which one
+        chosen = csv_files[0]
+        try:
+            df = self.load_from_csv(chosen)
+        except Exception as exc:
+            msg = f"synthetic: failed to parse {chosen.name} ({exc})"
+            logger.warning("PeMS CSV load failed: %s", exc)
+            return None, msg
+
+        if df.empty:
+            msg = f"synthetic: {chosen.name} parsed to empty frame"
+            return None, msg
+
+        n_rows = len(df)
+        n_days = int(df["timestamp"].dt.date.nunique()) if "timestamp" in df.columns else 0
+        msg = f"real_pems: {chosen.name} ({n_days} days, {n_rows} rows)"
+        logger.info("PeMS CSV adapter: %s", msg)
+        return df, msg
 
     def calibration_by_hour(self, df: pd.DataFrame) -> dict[int, float]:
         """Derive per-hour mean arrival rate from PeMS data.

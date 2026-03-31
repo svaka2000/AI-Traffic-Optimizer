@@ -1018,7 +1018,213 @@ def _tab_export() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tab 7: Industry Comparison
+# Tab 7: Validation (Phase 9)
+# ---------------------------------------------------------------------------
+
+def _tab_validation() -> None:
+    st.markdown("## Validation — Rosecrans Corridor")
+    st.markdown(
+        "Compare AITO simulation results against the **verified real-world results** "
+        "from the 2017 Rosecrans Street InSync deployment in San Diego.  "
+        "Source: *San Diego Mayor Kevin Faulconer, March 2017.*"
+    )
+
+    # --- PeMS data upload widget ---
+    st.markdown('<div class="section-header">PeMS Data (Optional)</div>', unsafe_allow_html=True)
+    st.markdown(
+        "Upload a PeMS Station 5-Minute CSV to calibrate the simulation to real "
+        "San Diego detector data.  Without it, synthetic demand profiles are used."
+    )
+    uploaded = st.file_uploader(
+        "Upload PeMS Station CSV",
+        type=["csv"],
+        help=(
+            "Download from pems.dot.ca.gov → Data → Station 5-Minute → District 11. "
+            "Place in data/raw/pems_station_<ID>.csv and re-run validation."
+        ),
+        key="pems_upload",
+    )
+    if uploaded is not None:
+        import tempfile, os
+        raw_dir = Path("data/raw")
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        dest = raw_dir / uploaded.name
+        dest.write_bytes(uploaded.getvalue())
+        st.success(f"Saved to {dest} — click Run Validation to use it.")
+
+    # --- existing validation report ---
+    report_path = Path("artifacts/validation_report.json")
+    existing_report: dict | None = None
+    if report_path.exists():
+        try:
+            existing_report = json.loads(report_path.read_text())
+        except Exception:
+            pass
+
+    # --- run button ---
+    col_r, col_s = st.columns([2, 1])
+    with col_s:
+        run_val = st.button("▶ Run Validation", use_container_width=True, key="val_run_btn")
+
+    if run_val:
+        with st.spinner("Running Rosecrans corridor validation…"):
+            try:
+                from traffic_ai.validation.rosecrans_validator import RosecransValidator
+                settings = _load_settings()
+                validator = RosecransValidator(
+                    raw_data_dir=settings.raw_data_dir,
+                    output_dir=settings.output_dir,
+                    n_steps=2000,
+                    seed=settings.seed,
+                )
+                result = validator.run()
+                existing_report = json.loads(
+                    (settings.output_dir / "validation_report.json").read_text()
+                )
+                st.success("Validation complete!")
+            except Exception as e:
+                st.error(f"Validation failed: {e}")
+
+    # --- render report ---
+    if existing_report:
+        _render_validation_report(existing_report)
+    else:
+        st.info(
+            "No validation report found.  Click **Run Validation** to generate one, "
+            "or run `python main.py --validate-rosecrans` from the terminal."
+        )
+
+
+def _render_validation_report(report: dict) -> None:
+    """Render validation report cards and demand profile chart."""
+    sim = report.get("simulation", {})
+    bench = report.get("real_world_benchmark", {})
+    cal = report.get("calibration_assessment", {})
+
+    st.markdown('<div class="section-header">Rosecrans Corridor Results</div>',
+                unsafe_allow_html=True)
+
+    cols = st.columns(4)
+    fixed_wait  = sim.get("fixed_timing_avg_wait_sec", 0.0)
+    greedy_wait = sim.get("greedy_adaptive_avg_wait_sec", 0.0)
+    improvement = sim.get("improvement_pct", 0.0)
+    gap         = cal.get("gap_percentage_points", 0.0)
+    within_tol  = cal.get("within_tolerance", False)
+
+    cols[0].markdown(
+        _kpi_card("Fixed Timing Avg Wait", f"{fixed_wait:.1f} s"), unsafe_allow_html=True
+    )
+    cols[1].markdown(
+        _kpi_card("GreedyAdaptive Avg Wait", f"{greedy_wait:.1f} s"), unsafe_allow_html=True
+    )
+    cols[2].markdown(
+        _kpi_card(
+            "Simulated Improvement", f"{improvement:.1f}%",
+            delta=f"Benchmark: {bench.get('travel_time_reduction_pct', 25):.0f}%",
+            delta_positive=improvement > 0,
+        ),
+        unsafe_allow_html=True,
+    )
+    status_label = "PASS" if within_tol else "OUTSIDE TOLERANCE"
+    cols[3].markdown(
+        _kpi_card(
+            "Calibration Status", status_label,
+            delta=f"Gap: {gap:.1f} pp",
+            delta_positive=within_tol,
+        ),
+        unsafe_allow_html=True,
+    )
+
+    # Benchmark comparison table
+    st.markdown('<div class="section-header">Real-World Benchmark (2017)</div>',
+                unsafe_allow_html=True)
+    bench_df = pd.DataFrame([{
+        "Metric": "Travel time reduction",
+        "AITO Simulation": f"{improvement:.1f}%",
+        "Real-World 2017": f"{bench.get('travel_time_reduction_pct', 25):.0f}%",
+        "Within ±10 pp": "✓ Yes" if within_tol else "✗ No",
+    }, {
+        "Metric": "Stop reduction (reference only)",
+        "AITO Simulation": "N/A (not tracked in simulation)",
+        "Real-World 2017": f"{bench.get('stop_reduction_pct', 53):.0f}%",
+        "Within ±10 pp": "—",
+    }])
+    st.dataframe(bench_df, use_container_width=True)
+    st.caption(
+        f"Source: {bench.get('source', '')} | "
+        f"System: {bench.get('system', '')} | "
+        f"Demand: {sim.get('demand_source', 'synthetic')}"
+    )
+
+    # Demand profile comparison chart (synthetic vs PeMS if available)
+    _render_demand_profile_comparison(sim.get("demand_source", ""))
+
+
+def _render_demand_profile_comparison(demand_source: str) -> None:
+    """Show synthetic vs real PeMS demand profile comparison chart."""
+    st.markdown('<div class="section-header">Demand Profile Comparison</div>',
+                unsafe_allow_html=True)
+
+    import math
+    hours = list(range(24))
+
+    # Synthetic profile — rush_hour formula from DemandModel
+    base = 0.12
+    synthetic = []
+    for h in hours:
+        morning = math.exp(-((h - 8.0) ** 2) / 3.0)
+        evening = math.exp(-((h - 17.5) ** 2) / 3.0)
+        peak = 1.0 + 1.6 * max(morning, evening)
+        synthetic.append(base * 1.1 * peak)   # N/S direction multiplier
+
+    import plotly.graph_objects as go
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=hours, y=synthetic,
+        name="Synthetic (AITO default)",
+        line=dict(color=AITO_TEAL, width=2),
+    ))
+
+    # Real PeMS profile if available
+    raw_dir = Path("data/raw")
+    try:
+        from traffic_ai.data_pipeline.pems_connector import PeMSConnector
+        connector = PeMSConnector(station_id=400456)
+        csv_files = connector.auto_detect_pems_files(raw_dir)
+        if csv_files:
+            pems_df = connector.load_from_csv(csv_files[0])
+            if not pems_df.empty:
+                profile = connector.compute_hourly_demand_profile(pems_df)
+                pems_vals = [profile.get(h, 0.12) for h in hours]
+                fig.add_trace(go.Scatter(
+                    x=hours, y=pems_vals,
+                    name=f"Real PeMS ({csv_files[0].name})",
+                    line=dict(color=AITO_GOLD, width=2),
+                ))
+    except Exception:
+        pass
+
+    fig.update_layout(
+        title="Arrival Rate by Hour of Day",
+        paper_bgcolor=AITO_NAVY, plot_bgcolor="#0D1E35",
+        font=dict(color="#E8F4F8"),
+        xaxis=dict(title="Hour of Day", gridcolor="#1A2E48", tickvals=list(range(0, 24, 2))),
+        yaxis=dict(title="Arrival Rate (veh/sec/lane)", gridcolor="#1A2E48"),
+        legend=dict(bgcolor="#0D1E35", bordercolor="#1A2E48"),
+        height=300,
+        margin=dict(t=40, b=40, l=40, r=40),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    if "real_pems" not in demand_source:
+        st.info(
+            "Only the synthetic profile is shown.  Upload a PeMS CSV above to see "
+            "how the real San Diego demand pattern compares."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tab 8: Industry Comparison
 # ---------------------------------------------------------------------------
 
 def _tab_industry_comparison() -> None:
@@ -1124,13 +1330,14 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "🌐 Network Overview",
         "🔬 Benchmark Lab",
         "👁 Shadow Mode",
         "🎓 Controller Training",
         "📊 Data & Calibration",
         "📤 Export",
+        "✅ Validation",
         "🏙 Industry Comparison",
     ])
 
@@ -1147,6 +1354,8 @@ def main() -> None:
     with tab6:
         _tab_export()
     with tab7:
+        _tab_validation()
+    with tab8:
         _tab_industry_comparison()
 
 

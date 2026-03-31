@@ -274,3 +274,47 @@ and Caltrans District 11 Division Chief Fariba Ramos.
 **Phase 8L — Documentation**
 - [x] PLANS.md updated with Phase 8 section.
 - [x] README.md updated with Real-World Features, San Diego Scenarios, Industry Comparison sections.
+
+### Phase 9: Real Data Validation — DONE
+
+Answers the question: "What real data did you use?" when presenting to
+Fariba Ramos (Caltrans District 11) or Steve Celniker (City of San Diego).
+
+**Phase 9A — PeMS CSV Adapter**
+- [x] `PeMSConnector.load_from_csv()`: parses real Caltrans PeMS Station 5-Minute
+  CSV files; tolerates missing columns, bad rows, messy quoting.
+- [x] `PeMSConnector.compute_hourly_demand_profile()`: weekday-filtered,
+  quality-filtered (pct_observed ≥ 0.5), fallback to 0.12 if < 3 days data.
+- [x] `PeMSConnector.auto_detect_pems_files()`: scans data/raw/ for pems_station_*.csv.
+- [x] `PeMSConnector.load_best_available()`: real PeMS or synthetic fallback with
+  clear source labeling.
+
+**Phase 9B — Rosecrans Corridor Validator**
+- [x] `traffic_ai/validation/rosecrans_validator.py`: `RosecransValidator`,
+  `ValidationResult`, `ROSECRANS_BENCHMARK` constants.
+- [x] Compares GreedyAdaptive vs FixedTiming on 12-signal Rosecrans corridor.
+- [x] Reports gap vs verified 25% real-world improvement (Faulconer 2017).
+- [x] Saves `artifacts/validation_report.json`.
+- [x] `--validate-rosecrans` CLI flag wired into `main.py`.
+
+**Phase 9C — Demand Model Calibration**
+- [x] `DemandModel.calibrate_from_pems_profile()`: uses real PeMS hourly rates
+  instead of synthetic Gaussian peaks when calibrated.
+- [x] Scale multiplier still applied on top; fully backward compatible.
+
+**Phase 9D — Dashboard Validation Tab**
+- [x] New "Validation" tab (7th tab): Rosecrans corridor comparison cards,
+  PeMS CSV upload widget, demand profile comparison chart (synthetic vs real).
+
+**Phase 9E — README**
+- [x] "Using Real Traffic Data (PeMS)" section with download instructions,
+  `--validate-rosecrans` usage, example output.
+
+**Phase 9F — Tests**
+- [x] `tests/test_pems_adapter.py`: 7 tests (CSV columns, hourly profile,
+  data quality filter, arrival rate formula, auto-detect, load_best_available).
+- [x] `tests/test_rosecrans_validator.py`: 5 tests (synthetic fallback, positive
+  improvement, JSON written, benchmark constants, summary_lines).
+- [x] `tests/test_demand_calibration.py`: 5 tests (PeMS override, synthetic mode,
+  rush-hour higher, scale multiplier, replaceable calibration).
+- [x] All 212+ tests pass.
