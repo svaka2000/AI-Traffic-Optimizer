@@ -70,6 +70,79 @@ def _safe_float(value: object, default: float) -> float:
     except (TypeError, ValueError):
         return default
 
+
+def _pems_column_names(n_cols: int) -> list[str]:
+    """Generate standard PeMS 5-minute column names for n_cols total columns.
+
+    PeMS District-11 bulk exports have no header row.  The layout is:
+      0: Timestamp, 1: Station, 2: District, 3: Freeway, 4: Direction,
+      5: Lane Type, 6: Station Length, 7: Samples, 8: % Observed,
+      9: Total Flow, 10: Avg Occupancy, 11: Avg Speed,
+      12+: Lane N Flow, Lane N Avg Occ, Lane N Avg Speed, Lane N Observed
+                        (4 columns per lane, up to 8 lanes)
+    """
+    base = [
+        "Timestamp", "Station", "District", "Freeway", "Direction",
+        "Lane Type", "Station Length", "Samples", "% Observed",
+        "Total Flow", "Avg Occupancy", "Avg Speed",
+    ]
+    lane_cols: list[str] = []
+    lane_num = 1
+    while len(base) + len(lane_cols) < n_cols:
+        lane_cols += [
+            f"Lane {lane_num} Flow",
+            f"Lane {lane_num} Avg Occ",
+            f"Lane {lane_num} Avg Speed",
+            f"Lane {lane_num} Observed",
+        ]
+        lane_num += 1
+    all_cols = base + lane_cols
+    return all_cols[:n_cols]
+
+
+def _read_pems_csv(path: Path) -> pd.DataFrame:
+    """Read a PeMS CSV, auto-detecting whether it has a header row.
+
+    PeMS Data Clearinghouse bulk exports (District 5-Minute) omit the header.
+    API-downloaded files include the header.  We detect by checking whether
+    the first field of the first row is parseable as a datetime.
+    """
+    # Sniff first line
+    with open(path, "r", errors="replace") as fh:
+        first_line = fh.readline().strip()
+
+    first_field = first_line.split(",")[0].strip().strip('"')
+    has_header = pd.isna(pd.to_datetime(first_field, errors="coerce")) is True
+    # isna returns True when the parse FAILS, meaning the field is text → has header
+    # isna returns False when parse SUCCEEDS, meaning the field is a datetime → no header
+
+    # More direct: try datetime parse
+    try:
+        pd.to_datetime(first_field)
+        headerless = True   # first field is a timestamp → no header row
+    except Exception:
+        headerless = False  # first field is text → header row present
+
+    if headerless:
+        # Read once to get column count, then re-read with names
+        probe = pd.read_csv(path, header=None, nrows=1, low_memory=False)
+        n_cols = len(probe.columns)
+        col_names = _pems_column_names(n_cols)
+        df = pd.read_csv(
+            path, header=None, names=col_names, low_memory=False
+        )
+        logger.info(
+            "PeMS CSV %s: headerless format detected, %d columns, %d rows.",
+            path.name, n_cols, len(df),
+        )
+    else:
+        df = pd.read_csv(path, low_memory=False)
+        logger.info(
+            "PeMS CSV %s: header row detected, %d rows.", path.name, len(df)
+        )
+
+    return df
+
 _DEFAULT_STATION: int = 400456           # I-5 near downtown San Diego
 _PEMS_API_BASE: str = "https://pems.dot.ca.gov"
 _ENV_VAR_API_KEY: str = "PEMS_API_KEY"       # optional token-based auth
@@ -226,7 +299,7 @@ class PeMSConnector:
             raise FileNotFoundError(f"PeMS CSV not found: {path}")
 
         try:
-            raw = pd.read_csv(path, low_memory=False)
+            raw = _read_pems_csv(path)
         except Exception as exc:
             logger.warning("Failed to read PeMS CSV %s: %s — returning empty frame.", path, exc)
             return pd.DataFrame(columns=_PEMS_CSV_SCHEMA)
@@ -243,7 +316,7 @@ class PeMSConnector:
         pct_obs_col = _find_col(col_lower, ["% observed", "%observed", "pct observed"])
         station_col = _find_col(col_lower, ["station"])
 
-        # count lane flow columns: "Lane N Flow" or "Lane N Avg Occ"
+        # count lane flow columns: "Lane N Flow"
         lane_flow_cols = [c for k, c in col_lower.items()
                           if "lane" in k and "flow" in k]
         n_lanes = max(len(lane_flow_cols), 1)
@@ -345,11 +418,16 @@ class PeMSConnector:
         filtered = filtered.copy()
         filtered["_date"] = filtered["timestamp"].dt.date
 
+        # Determine minimum days threshold: relax to 1 for small datasets
+        # (e.g. a single-day bulk District 11 export is still real data).
+        total_days = filtered["_date"].nunique()
+        min_days = min(3, max(1, total_days))
+
         profile: dict[int, float] = {}
         for hour in range(24):
             hourly = filtered[filtered["hour_of_day"] == hour]
             n_days = hourly["_date"].nunique()
-            if n_days >= 3:
+            if n_days >= min_days and len(hourly) > 0:
                 profile[hour] = float(hourly["arrival_rate_per_sec"].mean())
             else:
                 profile[hour] = _SYNTHETIC_DEFAULT
@@ -396,7 +474,9 @@ class PeMSConnector:
 
         n_rows = len(df)
         n_days = int(df["timestamp"].dt.date.nunique()) if "timestamp" in df.columns else 0
-        msg = f"real_pems: {chosen.name} ({n_days} days, {n_rows} rows)"
+        n_stations = int(df["station_id"].nunique()) if "station_id" in df.columns else 1
+        station_note = f"{n_stations} stations" if n_stations > 1 else f"station {self.station_id}"
+        msg = f"real_pems: {chosen.name} ({n_days} days, {n_rows} rows, {station_note})"
         logger.info("PeMS CSV adapter: %s", msg)
         return df, msg
 
